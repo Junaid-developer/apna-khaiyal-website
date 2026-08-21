@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 240" fill="none" class="w-full h-full">
+  <defs>
+    <!-- Rich Golden Gradients matching Apna Khaiyal palette -->
+    <linearGradient id="goldGrad1" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#FFF0A8"/>
+      <stop offset="25%" stop-color="#E7C66A"/>
+      <stop offset="65%" stop-color="#D4AF37"/>
+      <stop offset="100%" stop-color="#8E6A1B"/>
+    </linearGradient>
+
+    <linearGradient id="goldGrad2" x1="0%" y1="0%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#FFEAA0"/>
+      <stop offset="30%" stop-color="#E7C66A"/>
+      <stop offset="70%" stop-color="#C59B27"/>
+      <stop offset="100%" stop-color="#7B5610"/>
+    </linearGradient>
+
+    <linearGradient id="goldGrad3" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="20%" stop-color="#FFE893"/>
+      <stop offset="60%" stop-color="#E7C66A"/>
+      <stop offset="100%" stop-color="#A57A18"/>
+    </linearGradient>
+
+    <linearGradient id="goldGradStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF2BA"/>
+      <stop offset="50%" stop-color="#E7C66A"/>
+      <stop offset="100%" stop-color="#9A721E"/>
+    </linearGradient>
+
+    <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#E7C66A" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#goldGlow)">
+    <!-- Main Left Wing / Swan Body of K -->
+    <path
+      d="M50,26 C75,26 95,35 125,58 C155,82 178,118 202,152 C184,185 158,212 120,222 C88,225 68,205 70,170 C72,130 90,88 140,48 C108,30 75,25 50,26 Z"
+      fill="url(#goldGrad1)"
+    />
+
+    <!-- Lower Right Wing / Tail Fin -->
+    <path
+      d="M185,150 C215,188 255,208 300,215 C335,212 355,205 350,203 C310,195 272,175 235,142 C215,124 198,138 185,150 Z"
+      fill="url(#goldGrad2)"
+    />
+
+    <!-- Right Upper Wing / Feather Swirl with Hatching lines -->
+    <path
+      d="M135,170 C165,130 205,85 255,52 C285,34 315,25 325,25 C315,30 290,48 262,72 C225,105 188,148 160,190 C145,185 138,178 135,170 Z"
+      fill="url(#goldGrad3)"
+    />
+
+    <!-- Decorative Parallel Lining on Upper Wing -->
+    <g stroke="url(#goldGradStroke)" stroke-width="2" stroke-linecap="round" opacity="0.95">
+      <path d="M168,162 C195,126 230,88 275,56" />
+      <path d="M178,154 C205,120 238,82 285,50" />
+      <path d="M188,146 C215,112 248,76 295,44" />
+      <path d="M198,138 C225,104 258,70 305,38" />
+      <path d="M208,130 C235,96 268,64 315,32" />
+    </g>
+
+    <!-- Lower Sweeping Accent Wing Curve -->
+    <path
+      d="M210,146 C250,185 295,202 350,205 C320,195 285,175 250,140 Z"
+      fill="url(#goldGrad1)"
+      opacity="0.9"
+    />
+  </g>
+</svg>
