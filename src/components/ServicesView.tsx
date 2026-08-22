@@ -37,7 +37,7 @@ export const getServiceCategory = (service: ServiceItem): string => {
 
 export const getServiceImage = (title: string, customImage?: string) => customImage?.trim() || '';
 
-export default function ServicesView({ services, settings, setCurrentTab, isLoading = false }: ServicesViewProps) {
+export default function ServicesView({ services, settings, setCurrentTab }: ServicesViewProps) {
   const connect = () => { setCurrentTab('contact'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
   return (
@@ -53,7 +53,7 @@ export default function ServicesView({ services, settings, setCurrentTab, isLoad
         </header>
 
         <div id="services-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {isLoading ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[430px] rounded-2xl bg-[#2d545e]/60 animate-pulse" />) : services.map((service) => {
+          {services.map((service) => {
             const Icon = getServiceIcon(service.icon);
             const image = getServiceImage(service.title, service.image);
             return (
