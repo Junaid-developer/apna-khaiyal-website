@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Check, Layers, Tag, ExternalLink, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { Check, Layers, Sparkles } from 'lucide-react';
 import { ProductItem } from '../types';
 
 interface ProductsViewProps { products: ProductItem[]; isLoading?: boolean; onBookDemo?: (productName: string) => void; }
 
 const getProductDashboardImage = (name: string, customImg?: string) => customImg?.trim() || '';
 
-export default function ProductsView({ products, isLoading = false, onBookDemo }: ProductsViewProps) {
+export default function ProductsView({ products, onBookDemo }: ProductsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeProductModal, setActiveProductModal] = useState<ProductItem | null>(null);
   const categories = ['All', ...Array.from(new Set(products.map(p => p.category).filter(Boolean)))];
@@ -25,7 +25,7 @@ export default function ProductsView({ products, isLoading = false, onBookDemo }
         </div>
 
         <div id="products-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {isLoading ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[560px] rounded-3xl bg-[#2d545e]/60 animate-pulse" />) : filtered.map(prod => {
+          {filtered.map(prod => {
             const image = getProductDashboardImage(prod.name, prod.image);
             return <article key={prod.id} id={`product-card-${prod.id}`} onClick={() => setActiveProductModal(prod)} className="premium-card rounded-3xl overflow-hidden flex flex-col group cursor-pointer">
               <div className="relative aspect-[16/10] overflow-hidden border-b border-[#3f6973] bg-[#214b55]">
