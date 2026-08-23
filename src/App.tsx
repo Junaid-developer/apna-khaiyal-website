@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+  import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Code, 
@@ -711,14 +711,12 @@ export default function App() {
                           onClick={() => {
                             setCurrentTab('services');
                             window.scrollTo({ top: 0, behavior: 'smooth' });
-                          }}
-                          initial={{ opacity: 0, y: 20 }}
-                          whileInView={{ opacity: 1, y: 0 }}
-                          viewport={{ once: true, margin: "-40px" }}
-                          transition={{ duration: 0.45, delay: idx * 0.1, ease: "easeOut" }}
-                          whileHover={{ y: -6, transition: { duration: 0.25, ease: "easeOut" } }}
-                          className="premium-card p-5 rounded-2xl space-y-3 group hover:border-[#e1b382]/50 transition-colors flex flex-col justify-between cursor-pointer"
-                        >
+                        }}
+                            initial={false}
+                            whileHover={{ y: -4 }}
+                            transition={{ duration: 0.2, ease: "easeOut" }}
+                            className="premium-card p-5 rounded-2xl space-y-3 group hover:border-[#e1b382]/50 transition-colors flex flex-col justify-between cursor-pointer"
+>
                           <div className="space-y-3">
                             <div className="w-11 h-11 rounded-xl bg-[#12343b] border border-[#e1b382]/40 flex items-center justify-center shrink-0 text-[#e1b382] group-hover:border-[#e1b382] group-hover:scale-105 transition-all shadow-md">
                               <IconComponent className="w-5 h-5 text-[#e1b382] shrink-0" />
