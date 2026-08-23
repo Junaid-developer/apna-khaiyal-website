@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SystemSettings, CompanyInformation, CompanyContact } from '../types';
@@ -36,6 +36,17 @@ export default function Navbar({
     { id: 'contact', label: 'Contact' }
   ];
 
+  // When a public page is opened directly, select the matching view.
+  // Admin routes are intentionally ignored here.
+  useEffect(() => {
+    const path = window.location.pathname.replace(/\/$/, '') || '/';
+    const publicPath = path === '/' ? 'home' : path.slice(1);
+    const isPublicPage = menuItems.some((item) => item.id === publicPath);
+    if (isPublicPage && currentTab !== publicPath) {
+      setCurrentTab(publicPath);
+    }
+  }, [currentTab, setCurrentTab]);
+
   const handleNavClick = (tabId: string) => {
     const route = tabId === 'home' ? '/' : `/${tabId}`;
     if (window.location.pathname !== route) {
@@ -54,15 +65,15 @@ export default function Navbar({
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[#173D46]/90 backdrop-blur-md border-b border-white/10 shadow-lg" id="main-navbar">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
-          <div 
-            className="flex-shrink-0 flex items-center cursor-pointer group py-1" 
+          <div
+            className="flex-shrink-0 flex items-center cursor-pointer group py-1"
             onClick={() => handleNavClick('home')}
             id="header-brand-container"
           >
-            <BrandLogo 
-              customLogoUrl={settings.companyLogo} 
-              size="md" 
-              showTagline={true} 
+            <BrandLogo
+              customLogoUrl={settings.companyLogo}
+              size="md"
+              showTagline={true}
             />
           </div>
 
