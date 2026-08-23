@@ -37,6 +37,11 @@ export default function Navbar({
   ];
 
   const handleNavClick = (tabId: string) => {
+    const route = tabId === 'home' ? '/' : `/${tabId}`;
+    if (window.location.pathname !== route) {
+      window.history.pushState({ page: tabId }, '', route);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
     setCurrentTab(tabId);
     setIsMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -49,7 +54,6 @@ export default function Navbar({
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[#173D46]/90 backdrop-blur-md border-b border-white/10 shadow-lg" id="main-navbar">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
-          {/* Logo / Brand Name */}
           <div 
             className="flex-shrink-0 flex items-center cursor-pointer group py-1" 
             onClick={() => handleNavClick('home')}
@@ -62,7 +66,6 @@ export default function Navbar({
             />
           </div>
 
-          {/* Desktop Navigation Links */}
           <div className="hidden md:flex items-center space-x-1 lg:space-x-4">
             {menuItems.map((item) => {
               const isActive = currentTab === item.id;
@@ -90,9 +93,7 @@ export default function Navbar({
             })}
           </div>
 
-          {/* Right Action Controls: Mobile Menu Trigger */}
           <div className="flex items-center space-x-2 md:space-x-3">
-            {/* Mobile Hamburger Trigger */}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               id="mobile-menu-trigger"
@@ -106,7 +107,6 @@ export default function Navbar({
         </div>
       </div>
 
-      {/* Mobile Menu Slide Drawer */}
       <AnimatePresence>
         {isMobileMenuOpen && (
           <motion.div
