@@ -4,7 +4,7 @@ import { ProductItem } from '../types';
 
 interface ProductsViewProps { products: ProductItem[]; isLoading?: boolean; onBookDemo?: (productName: string) => void; }
 
-const getProductDashboardImage = (name: string, customImg?: string) => customImg?.trim() || '';
+const getProductDashboardImage = (name: string, customImg?: string, gallery?: string[]) => customImg?.trim() || gallery?.find(Boolean) || '';
 
 export default function ProductsView({ products, onBookDemo }: ProductsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -26,7 +26,7 @@ export default function ProductsView({ products, onBookDemo }: ProductsViewProps
 
         <div id="products-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map(prod => {
-            const image = getProductDashboardImage(prod.name, prod.image);
+            const image = getProductDashboardImage(prod.name, prod.image, prod.gallery);
             return <article key={prod.id} id={`product-card-${prod.id}`} onClick={() => setActiveProductModal(prod)} className="premium-card rounded-3xl overflow-hidden flex flex-col group cursor-pointer">
               <div className="relative aspect-[16/10] overflow-hidden border-b border-[#3f6973] bg-[#214b55]">
                 {image ? <img src={image} alt={`${prod.name} Dashboard Mockup`} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="w-full h-full object-cover opacity-90" /> : <div className="w-full h-full flex items-center justify-center"><Layers className="w-16 h-16 text-[#e1b382]/70" /></div>}

@@ -2839,6 +2839,7 @@ export async function fetchDashboardAnalyticsData(userRole: string = 'Admin'): P
     if (rawProducts.length === 0) {
       const stored = getStored('products', DEFAULT_PRODUCTS);
       if (Array.isArray(stored) && stored.length > 0) rawProducts = stored;
+      else rawProducts = DEFAULT_PRODUCTS;
     }
 
     let rawServices = Array.isArray(servicesRes.data) ? servicesRes.data : [];
@@ -2850,6 +2851,7 @@ export async function fetchDashboardAnalyticsData(userRole: string = 'Admin'): P
         } else {
           const stored = getStored('services', DEFAULT_SERVICES);
           if (Array.isArray(stored) && stored.length > 0) rawServices = stored;
+          else rawServices = DEFAULT_SERVICES;
         }
       } catch (err) {
         console.warn('Fallback services check error:', err);
@@ -2865,6 +2867,7 @@ export async function fetchDashboardAnalyticsData(userRole: string = 'Admin'): P
         } else {
           const stored = getStored('hero_slides', [DEFAULT_HERO]);
           if (Array.isArray(stored) && stored.length > 0) rawHeroSlides = stored;
+      else rawHeroSlides = DEFAULT_HERO_SLIDES;
         }
       } catch (err) {
         console.warn('Fallback hero slides check error:', err);
@@ -2875,12 +2878,14 @@ export async function fetchDashboardAnalyticsData(userRole: string = 'Admin'): P
     if (rawGallery.length === 0) {
       const stored = getStored('gallery', DEFAULT_GALLERY);
       if (Array.isArray(stored) && stored.length > 0) rawGallery = stored;
+      else rawGallery = DEFAULT_GALLERY;
     }
 
     let rawTeam = Array.isArray(teamRes.data) ? teamRes.data : [];
     if (rawTeam.length === 0) {
       const stored = getStored('team', DEFAULT_TEAM);
       if (Array.isArray(stored) && stored.length > 0) rawTeam = stored;
+      else rawTeam = DEFAULT_TEAM;
     }
 
     let rawCareers = Array.isArray(careersRes.data) ? careersRes.data : [];

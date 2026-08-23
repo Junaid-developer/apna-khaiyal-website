@@ -314,13 +314,13 @@ export default function App() {
       const liveData = await syncAllFromSupabase();
       if (liveData) {
         if (liveData.hero) setHero(liveData.hero);
-        if (liveData.heroSlides) setHeroSlides(liveData.heroSlides);
+        if (Array.isArray(liveData.heroSlides) && liveData.heroSlides.length > 0) setHeroSlides(liveData.heroSlides);
         if (liveData.about) setAbout(liveData.about);
-        if (liveData.services) setServices(liveData.services);
-        if (liveData.products) setProducts(liveData.products);
-        if (liveData.team) setTeam(liveData.team);
-        if (liveData.gallery) setGallery(liveData.gallery);
-        if (liveData.reviews) setReviews(liveData.reviews);
+        if (Array.isArray(liveData.services) && liveData.services.length > 0) setServices(liveData.services);
+        if (Array.isArray(liveData.products) && liveData.products.length > 0) setProducts(liveData.products);
+        if (Array.isArray(liveData.team) && liveData.team.length > 0) setTeam(liveData.team);
+        if (Array.isArray(liveData.gallery) && liveData.gallery.length > 0) setGallery(liveData.gallery);
+        if (Array.isArray(liveData.reviews) && liveData.reviews.length > 0) setReviews(liveData.reviews);
         if (liveData.careers) {
           const normCareers = Array.isArray(liveData.careers)
             ? liveData.careers
@@ -333,7 +333,7 @@ export default function App() {
             : (liveData.applications && typeof liveData.applications === 'object' ? [liveData.applications] : []);
           setApplications(normApps);
         }
-        if (liveData.messages) setMessages(liveData.messages);
+        if (Array.isArray(liveData.messages) && liveData.messages.length > 0) setMessages(liveData.messages);
         if (liveData.settings) setSettings(liveData.settings);
         if (liveData.companyInformation) {
           setCompanyInformation(liveData.companyInformation);
@@ -343,11 +343,11 @@ export default function App() {
           setCompanyContact(liveData.companyContact);
         }
         if (liveData.seo) setSEO(liveData.seo);
-        if (liveData.expertise) setExpertise(liveData.expertise);
+        if (Array.isArray(liveData.expertise) && liveData.expertise.length > 0) setExpertise(liveData.expertise);
         if (liveData.office) setOffice(liveData.office);
-        if (liveData.process) setProcessItems(liveData.process);
-        if (liveData.industries) setIndustryItems(liveData.industries);
-        if (liveData.techStack) setTechStackItems(liveData.techStack);
+        if (Array.isArray(liveData.process) && liveData.process.length > 0) setProcessItems(liveData.process);
+        if (Array.isArray(liveData.industries) && liveData.industries.length > 0) setIndustryItems(liveData.industries);
+        if (Array.isArray(liveData.techStack) && liveData.techStack.length > 0) setTechStackItems(liveData.techStack);
       }
       setIsDataLoading(false);
     };
