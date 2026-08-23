@@ -21,6 +21,29 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // The app uses a lightweight custom router. When a public route is
+      // opened directly, activate the matching React view after mount.
+      (() => {
+        const publicRoutes = new Set([
+          '/about', '/services', '/products', '/gallery',
+          '/team', '/careers', '/contact'
+        ]);
+        const path = window.location.pathname.replace(/\/$/, '') || '/';
+        if (!publicRoutes.has(path)) return;
+
+        const tab = path.slice(1);
+        let attempts = 0;
+        const timer = setInterval(() => {
+          const link = document.getElementById(`nav-link-${tab}`) || document.getElementById(`mobile-link-${tab}`);
+          if (link) {
+            clearInterval(timer);
+            link.click();
+          } else if (++attempts > 100) {
+            clearInterval(timer);
+          }
+        }, 50);
+      })();
+    </script>
   </body>
 </html>
-
