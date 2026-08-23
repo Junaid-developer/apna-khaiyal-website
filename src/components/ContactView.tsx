@@ -26,10 +26,18 @@ export default function ContactView({
   const displayPhone = activeInfo?.phone || settings?.phone || '+92 309 0111330';
   const displayEmail = activeInfo?.email || '';
 
-  // Clean phone string for tel: link while maintaining dynamic database binding
-  const rawPhone = displayPhone.includes('3001234567') ? '+92 309 0111330' : displayPhone;
-  const digitsOnly = rawPhone.replace(/[^\d+]/g, '');
-  const telHref = digitsOnly.startsWith('+') ? `tel:${digitsOnly}` : `tel:+${digitsOnly}`;
+  // Support multiple company phone numbers. The database may contain them separated by spaces/newlines.
+  // Keep each number on its own line instead of accidentally rendering them as one phone string.
+  const phoneNumbers = displayPhone
+    .split(/[\n,;]+|(?<=\d)\s+(?=[+\d])/g)
+    .map((phone) => phone.trim())
+    .filter(Boolean)
+    .map((phone) => phone.includes('3001234567') ? '+92 309 0111330' : phone);
+
+  const makeTelHref = (phone: string) => {
+    const digitsOnly = phone.replace(/[^\d+]/g, '');
+    return digitsOnly.startsWith('+') ? `tel:${digitsOnly}` : `tel:+${digitsOnly}`;
+  };
 
   // Form input states
   const [name, setName] = useState('');
@@ -153,16 +161,21 @@ export default function ContactView({
                 <div className="w-10 h-10 rounded-xl bg-[#12343b] flex items-center justify-center shrink-0 border border-[#3f6973]">
                   <Phone className="w-5 h-5 text-[#e1b382]" />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-2 min-w-0">
                   <span className="text-[10px] font-mono text-[#94A3B8] uppercase tracking-widest block leading-none">Secure Phone</span>
-                  <a 
-                    href={telHref} 
-                    id="contact-phone" 
-                    className="text-white hover:text-[#e1b382] hover:underline transition-colors text-sm font-sans block cursor-pointer break-all xs:break-normal"
-                    title="Click to dial company phone number"
-                  >
-                    {rawPhone}
-                  </a>
+                  <div className="flex flex-col gap-1">
+                    {phoneNumbers.map((phone, index) => (
+                      <a
+                        key={`${phone}-${index}`}
+                        href={makeTelHref(phone)}
+                        id={index === 0 ? 'contact-phone' : `contact-phone-${index + 1}`}
+                        className="text-white hover:text-[#e1b382] hover:underline transition-colors text-sm font-sans block cursor-pointer break-all xs:break-normal"
+                        title="Click to dial company phone number"
+                      >
+                        {phone}
+                      </a>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -258,109 +271,3 @@ export default function ContactView({
                       <span className="text-[10px] text-[#e1b382] font-semibold lowercase">selected</span>
                     )}
                   </label>
-                  <div className="relative">
-                    <input 
-                      type="text"
-                      list="available-products-list"
-                      placeholder="e.g. Apna Khaiyal HMS or ERP"
-                      value={productInterestedIn}
-                      onChange={(e) => setProductInterestedIn(e.target.value)}
-                      id="contact-form-product-input"
-                      className="w-full px-4 py-3 bg-[#12343b] border border-[#3f6973] focus:border-[#e1b382] rounded-xl text-sm text-white placeholder-[#94A3B8]/60 focus:outline-none transition-all"
-                    />
-                    {products && products.length > 0 && (
-                      <datalist id="available-products-list">
-                        {products.map(p => (
-                          <option key={p.id} value={p.name}>{p.name} ({p.category})</option>
-                        ))}
-                      </datalist>
-                    )}
-                  </div>
-                </div>
-
-                {/* Subject */}
-                <div>
-                  <label className="block text-xs font-mono text-[#94A3B8] uppercase tracking-wider mb-2">
-                    Subject *
-                  </label>
-                  <input 
-                    type="text"
-                    required
-                    placeholder="e.g. Custom ERP licensing query"
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    id="contact-form-subject-input"
-                    className="w-full px-4 py-3 bg-[#12343b] border border-[#3f6973] focus:border-[#e1b382] rounded-xl text-sm text-white placeholder-[#94A3B8]/60 focus:outline-none transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Message */}
-              <div>
-                <label className="block text-xs font-mono text-[#94A3B8] uppercase tracking-wider mb-2">
-                  Query Message *
-                </label>
-                <textarea 
-                  rows={4}
-                  required
-                  placeholder="Tell us about your organization scales and systems milestones..."
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  id="contact-form-message-input"
-                  className="w-full p-4 bg-[#12343b] border border-[#3f6973] focus:border-[#e1b382] rounded-xl text-sm text-white placeholder-[#94A3B8]/60 focus:outline-none transition-all resize-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                id="contact-form-submit-btn"
-                className="w-full sm:w-auto px-8 py-3.5 rounded-lg bg-[#e1b382] hover:bg-[#d4af37] text-[#12343b] hover:text-[#12343b] text-xs font-bold tracking-widest uppercase flex items-center justify-center space-x-2 shadow-lg cursor-pointer transition-all"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Send Secure Request</span>
-              </button>
-
-            </form>
-          </div>
-
-        </div>
-
-        {/* Embedded Google Map */}
-        {(() => {
-          const mapAddress = displayAddress || 'Model Town C, Bahawalpur, Pakistan';
-          const iframeSrc = (settings.googleMapsEmbedUrl && settings.googleMapsEmbedUrl.includes('output=embed'))
-            ? settings.googleMapsEmbedUrl
-            : `https://maps.google.com/maps?q=${encodeURIComponent(mapAddress)}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
-
-          return (
-            <div className="rounded-3xl overflow-hidden border border-[#3f6973] aspect-video max-h-[450px] relative shadow-2xl group" id="contact-gmap-wrapper">
-              <iframe
-                src={iframeSrc}
-                width="100%"
-                height="100%"
-                style={{ border: 0, filter: 'contrast(105%) opacity(85%)' }}
-                allowFullScreen
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title={`Google Maps Embed - ${mapAddress}`}
-              />
-              <div className="absolute top-4 right-4 z-10">
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapAddress)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 rounded-xl bg-[#12343b]/90 hover:bg-[#12343b] border border-[#e1b382]/50 hover:border-[#e1b382] text-xs font-bold text-[#e1b382] hover:text-[#F5D76E] shadow-xl backdrop-blur-md flex items-center space-x-2 transition-all cursor-pointer"
-                  id="contact-map-external-link"
-                >
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>View on Google Maps ↗</span>
-                </a>
-              </div>
-            </div>
-          );
-        })()}
-
-      </div>
-    </div>
-  );
-}
