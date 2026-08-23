@@ -28,8 +28,8 @@ export default function ContactView({
 
   // Support multiple company phone numbers. The database may contain them separated by spaces/newlines.
   // Keep each number on its own line instead of accidentally rendering them as one phone string.
-  const phoneNumbers = displayPhone
-    .split(/[\n,;]+|(?<=\d)\s+(?=[+\d])/g)
+  const phoneNumbers = [displayPhone, activeInfo?.phoneSecondary || '']
+    .flatMap((phone) => phone.split(/[\n,;]+/))
     .map((phone) => phone.trim())
     .filter(Boolean)
     .map((phone) => phone.includes('3001234567') ? '+92 309 0111330' : phone);

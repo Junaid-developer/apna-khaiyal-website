@@ -476,6 +476,7 @@ export default function AdminPanel({
         companyName: companyContactForm.companyName,
         email: companyContactForm.email,
         phone: companyContactForm.phone,
+        phoneSecondary: companyContactForm.phoneSecondary || '',
         address: companyContactForm.address
       });
 
@@ -10028,6 +10029,20 @@ export default function AdminPanel({
                           placeholder="e.g. +92 300 1234567"
                         />
                       </div>
+
+                      {/* Second Phone Number */}
+                      <div>
+                        <label className="block text-xs font-mono text-[#CBD5E1] uppercase tracking-wider mb-2">
+                          Second Phone Number
+                        </label>
+                        <input
+                          type="text"
+                          value={companyContactForm.phoneSecondary || ''}
+                          onChange={(e) => setCompanyContactForm({ ...companyContactForm, phoneSecondary: e.target.value })}
+                          className="w-full px-4 py-3 bg-[#12343b] border border-[#3f6973] focus:border-[#e1b382] rounded-xl text-sm text-white focus:outline-none transition-all"
+                          placeholder="e.g. +92 61 1234567"
+                        />
+                      </div>
                     </div>
 
                     {/* Company Address */}
@@ -10078,7 +10093,7 @@ export default function AdminPanel({
                         <span>Single Source of Truth Active</span>
                       </p>
                       <p className="text-[11px] text-amber-200/80 leading-relaxed">
-                        Company Name, Email, Phone, and Address are managed exclusively from the <strong>Company Contact</strong> tab (<code className="text-[#D4AF37] font-mono">company_information</code> table).
+                        Company Name, Email, Phone, Second Phone, and Address are managed exclusively from the <strong>Company Contact</strong> tab (<code className="text-[#D4AF37] font-mono">company_information</code> table).
                       </p>
                     </div>
 

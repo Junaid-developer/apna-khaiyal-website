@@ -183,6 +183,7 @@ export interface CompanyInformation {
   companyName: string;
   email: string;
   phone: string;
+  phoneSecondary?: string;
   ceoWhatsApp?: string;
   address: string;
   createdAt?: string;

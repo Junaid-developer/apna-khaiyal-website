@@ -816,6 +816,7 @@ export const fetchCompanyInformation = async (): Promise<CompanyInformation> => 
         companyName: first.company_name || DEFAULT_COMPANY_INFORMATION.companyName,
         email: first.email || DEFAULT_COMPANY_INFORMATION.email,
         phone: first.phone || DEFAULT_COMPANY_INFORMATION.phone,
+        phoneSecondary: first.phone_secondary || undefined,
         ceoWhatsApp: first.ceo_whatsapp || undefined,
         address: first.address || DEFAULT_COMPANY_INFORMATION.address,
         createdAt: first.created_at || first.updated_at,
@@ -857,6 +858,7 @@ export const fetchCompanyInformation = async (): Promise<CompanyInformation> => 
         companyName: inserted.company_name || DEFAULT_COMPANY_INFORMATION.companyName,
         email: inserted.email || DEFAULT_COMPANY_INFORMATION.email,
         phone: inserted.phone || DEFAULT_COMPANY_INFORMATION.phone,
+        phoneSecondary: inserted.phone_secondary || undefined,
         ceoWhatsApp: inserted.ceo_whatsapp || undefined,
         address: inserted.address || DEFAULT_COMPANY_INFORMATION.address,
         createdAt: inserted.created_at || inserted.updated_at,
@@ -903,6 +905,7 @@ export const updateCompanyInformation = async (data: Partial<CompanyInformation>
       company_name: updatedData.companyName,
       email: updatedData.email,
       phone: updatedData.phone,
+      phone_secondary: updatedData.phoneSecondary ?? null,
       ceo_whatsapp: updatedData.ceoWhatsApp ?? null,
       address: updatedData.address,
       updated_at: new Date().toISOString()

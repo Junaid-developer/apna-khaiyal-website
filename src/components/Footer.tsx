@@ -17,6 +17,7 @@ export default function Footer({ settings, companyInformation, companyContact, s
   const activeInfo = companyInformation || companyContact;
   const displayAddress = activeInfo?.address || '';
   const displayPhone = activeInfo?.phone || settings?.phone || '+92 309 0111330';
+  const displayPhoneSecondary = activeInfo?.phoneSecondary || '';
   const displayEmail = activeInfo?.email || '';
   const displayCompanyName = activeInfo?.companyName || 'ApnaKhaiyal';
 
@@ -180,16 +181,32 @@ export default function Footer({ settings, companyInformation, companyContact, s
                 <MapPin className="w-5 h-5 text-[#E7C66A] shrink-0 mr-3 mt-0.5" />
                 <span className="text-[#CBD5E1] leading-relaxed font-sans break-words">{displayAddress}</span>
               </div>
-              <div className="flex items-center">
-                <Phone className="w-4 h-4 text-[#E7C66A] shrink-0 mr-3" />
-                <a 
-                  href={footerTelHref} 
-                  id="footer-phone" 
-                  className="text-[#CBD5E1] hover:text-[#E7C66A] hover:underline transition-colors cursor-pointer break-all xs:break-normal"
-                  title="Click to dial company phone number"
-                >
-                  {rawPhone}
-                </a>
+              <div className="flex items-start">
+                <Phone className="w-4 h-4 text-[#E7C66A] shrink-0 mr-3 mt-1" />
+                <div className="flex flex-col gap-1.5 min-w-0">
+                  <a 
+                    href={footerTelHref} 
+                    id="footer-phone" 
+                    className="text-[#CBD5E1] hover:text-[#E7C66A] hover:underline transition-colors cursor-pointer break-all xs:break-normal"
+                    title="Click to dial company phone number"
+                  >
+                    {rawPhone}
+                  </a>
+                  {displayPhoneSecondary && (() => {
+                    const secondaryDigits = displayPhoneSecondary.replace(/[^\d+]/g, '');
+                    const secondaryHref = secondaryDigits.startsWith('+') ? `tel:${secondaryDigits}` : `tel:+${secondaryDigits}`;
+                    return (
+                      <a
+                        href={secondaryHref}
+                        id="footer-phone-2"
+                        className="text-[#CBD5E1] hover:text-[#E7C66A] hover:underline transition-colors cursor-pointer break-all xs:break-normal"
+                        title="Click to dial company phone number"
+                      >
+                        {displayPhoneSecondary}
+                      </a>
+                    );
+                  })()}
+                </div>
               </div>
               <div className="flex items-center">
                 <Mail className="w-4 h-4 text-[#E7C66A] shrink-0 mr-3" />
