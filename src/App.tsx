@@ -781,7 +781,7 @@ export default function App() {
                   {/* Slider Core Frame */}
                   {(() => {
                     const featuredList = products.filter(p => p.featured);
-                    if (isDataLoading) {
+                    if (false) {
                       return (
                         <div className="premium-card rounded-2xl p-6 sm:p-8 flex flex-col gap-6 shadow-xl animate-pulse border border-[#3f6973]/60 bg-[#2d545e]/50">
                           <div className="flex flex-col lg:flex-row items-start lg:items-center gap-6 sm:gap-8 w-full">
