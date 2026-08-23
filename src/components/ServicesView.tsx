@@ -38,7 +38,28 @@ export const getServiceCategory = (service: ServiceItem): string => {
   return 'Engineering';
 };
 
-export const getServiceImage = (_title: string, _customImage?: string) => '';
+// Small, compressed remote images. Cards lazy-load their image only when needed.
+const SERVICE_IMAGES: Record<string, string> = {
+  'web development': 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=600&q=55',
+  'mobile apps': 'https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&w=600&q=55',
+  'desktop systems': 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=600&q=55',
+  'ai & automation': 'https://images.unsplash.com/photo-1677442136019-21780ec3b7b3?auto=format&fit=crop&w=600&q=55',
+  'digital growth': 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=600&q=55',
+  'cloud & security': 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=600&q=55',
+  'engineering': 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=600&q=55'
+};
+
+export const getServiceImage = (title: string, customImage?: string) => {
+  if (customImage?.trim()) return customImage;
+  const t = title.toLowerCase();
+  if (/web|pwa|spa/.test(t)) return SERVICE_IMAGES['web development'];
+  if (/mobile|app|ios|android/.test(t)) return SERVICE_IMAGES['mobile apps'];
+  if (/desktop|electron/.test(t)) return SERVICE_IMAGES['desktop systems'];
+  if (/ai|automation|agentic|machine learning|language models/.test(t)) return SERVICE_IMAGES['ai & automation'];
+  if (/marketing|seo|growth|digital/.test(t)) return SERVICE_IMAGES['digital growth'];
+  if (/cloud|security|devops|infrastructure/.test(t)) return SERVICE_IMAGES['cloud & security'];
+  return SERVICE_IMAGES['engineering'];
+};
 
 export default function ServicesView({ services, settings, setCurrentTab }: ServicesViewProps) {
   const handleConnectClick = () => {
@@ -57,11 +78,22 @@ export default function ServicesView({ services, settings, setCurrentTab }: Serv
         <section id="services-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {services.map((service) => {
             const Icon = getServiceIcon(service.icon);
+            const imageUrl = getServiceImage(service.title, (service as ServiceItem & { image?: string }).image);
             return (
               <article key={service.id} id={`service-card-${service.id}`} onClick={handleConnectClick}
                 className="group bg-[#2d545e] border border-[#e1b382]/20 hover:border-[#e1b382]/60 rounded-2xl overflow-hidden flex flex-col cursor-pointer transition-colors duration-150">
-                <div className="relative h-36 sm:h-40 overflow-hidden bg-gradient-to-br from-[#214b55] via-[#2d545e] to-[#12343b]">
-                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_70%_20%,#e1b382,transparent_45%)]" />
+                <div className="relative h-40 sm:h-44 overflow-hidden bg-[#214b55]">
+                  <img
+                    src={imageUrl}
+                    alt={`${service.title} service`}
+                    loading="lazy"
+                    decoding="async"
+                    width="600"
+                    height="336"
+                    className="absolute inset-0 w-full h-full object-cover opacity-80 transition-transform duration-300 group-hover:scale-[1.03]"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#12343b] via-[#12343b]/25 to-transparent pointer-events-none" />
                   <span className="absolute top-3 right-3 px-2.5 py-1 text-[10px] font-mono font-bold uppercase text-[#e1b382] bg-[#12343b]/95 border border-[#e1b382]/40 rounded-full">{getServiceCategory(service)}</span>
                   <div className="absolute bottom-4 left-6 w-14 h-14 flex items-center justify-center bg-[#12343b] border-2 border-[#e1b382]/60 rounded-xl">
                     <Icon className="w-7 h-7 text-[#e1b382]" />
