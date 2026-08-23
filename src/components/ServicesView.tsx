@@ -38,11 +38,8 @@ export const getServiceCategory = (service: ServiceItem): string => {
   return 'Engineering';
 };
 
-export const getServiceImage = (title: string, customImage?: string) => {
-  return customImage?.trim() || '';
-};
-
-const fallbackImage = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450"%3E%3Crect width="800" height="450" fill="%232d545e"/%3E%3Cpath d="M0 350L220 220l130 80 120-140 330 210H0z" fill="%233f6973"/%3E%3C/svg%3E';
+// Kept for compatibility with other imports; Services no longer requests remote images.
+export const getServiceImage = (_title: string, _customImage?: string) => '';
 
 export default function ServicesView({ services, settings, setCurrentTab, isLoading = false }: ServicesViewProps) {
   const handleConnectClick = () => {
@@ -55,33 +52,23 @@ export default function ServicesView({ services, settings, setCurrentTab, isLoad
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <header className="text-center mb-10 sm:mb-14">
           <h2 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight">{settings?.servicesSectionHeading || 'Our Expertise'}</h2>
-          {settings?.servicesSectionSubtitle?.trim() && (
-            <p className="text-[#94A3B8] max-w-3xl mx-auto mt-5 text-base sm:text-lg leading-relaxed">{settings.servicesSectionSubtitle}</p>
-          )}
+          {settings?.servicesSectionSubtitle?.trim() && <p className="text-[#94A3B8] max-w-3xl mx-auto mt-5 text-base sm:text-lg leading-relaxed">{settings.servicesSectionSubtitle}</p>}
         </header>
 
         <section id="services-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {isLoading ? Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="bg-[#2d545e] border border-[#3f6973] rounded-2xl overflow-hidden h-[430px] animate-pulse" />
-          )) : services.map((service) => {
+          {isLoading ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="bg-[#2d545e] border border-[#3f6973] rounded-2xl h-[430px] animate-pulse" />) : services.map((service) => {
             const Icon = getServiceIcon(service.icon);
-            const image = getServiceImage(service.title, service.image);
             return (
               <article key={service.id} id={`service-card-${service.id}`} onClick={handleConnectClick}
-                className="group bg-[#2d545e] border border-[#e1b382]/20 hover:border-[#e1b382]/60 rounded-2xl overflow-hidden flex flex-col cursor-pointer transition-colors duration-200">
-                <div className="relative aspect-[16/9] overflow-hidden bg-[#214b55]">
-                  {image ? (
-                    <img src={image} alt={service.title} loading="lazy" decoding="async" fetchPriority="low" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  ) : (
-                    <img src={fallbackImage} alt="" aria-hidden="true" className="w-full h-full object-cover" />
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#2d545e] to-transparent" />
+                className="group bg-[#2d545e] border border-[#e1b382]/20 hover:border-[#e1b382]/60 rounded-2xl overflow-hidden flex flex-col cursor-pointer transition-colors duration-150">
+                <div className="relative h-36 sm:h-40 overflow-hidden bg-gradient-to-br from-[#214b55] via-[#2d545e] to-[#12343b]">
+                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_70%_20%,#e1b382,transparent_45%)]" />
                   <span className="absolute top-3 right-3 px-2.5 py-1 text-[10px] font-mono font-bold uppercase text-[#e1b382] bg-[#12343b]/95 border border-[#e1b382]/40 rounded-full">{getServiceCategory(service)}</span>
-                  <div className="absolute -bottom-1 left-6 w-14 h-14 flex items-center justify-center bg-[#12343b] border-2 border-[#e1b382]/60 rounded-xl">
+                  <div className="absolute bottom-4 left-6 w-14 h-14 flex items-center justify-center bg-[#12343b] border-2 border-[#e1b382]/60 rounded-xl shadow-lg">
                     <Icon className="w-7 h-7 text-[#e1b382]" />
                   </div>
                 </div>
-                <div className="p-7 pt-10 flex-1 flex flex-col">
+                <div className="p-7 pt-6 flex-1 flex flex-col">
                   <h3 className="text-xl font-bold text-white mb-3">{service.title}</h3>
                   <p className="text-[#94A3B8] text-sm leading-relaxed line-clamp-3 flex-1">{service.description}</p>
                   <button onClick={(e) => { e.stopPropagation(); handleConnectClick(); }} id={`service-learn-more-${service.id}`}
@@ -100,9 +87,7 @@ export default function ServicesView({ services, settings, setCurrentTab, isLoad
             <h3 className="mt-4 text-2xl sm:text-3xl font-extrabold">How We Engineer Enterprise Solvency</h3>
             <p className="mt-4 text-[#94A3B8] text-sm leading-relaxed">Our team applies modular design principles, rigorous type safety, and continuous integration routines. Every platform, web engine, or AI architecture we deliver undergoes comprehensive compliance and stress audits.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 text-xs font-medium">
-              {['TypeScript Strict Type-Safety','Automated E2E Audit Suites','Sub-second Global Edge Delivery','Supabase & Relational Solvency'].map(item => (
-                <div key={item} className="flex items-center gap-2.5"><CheckCircle2 className="w-4 h-4 text-[#e1b382]" /><span>{item}</span></div>
-              ))}
+              {['TypeScript Strict Type-Safety','Automated E2E Audit Suites','Sub-second Global Edge Delivery','Supabase & Relational Solvency'].map(item => <div key={item} className="flex items-center gap-2.5"><CheckCircle2 className="w-4 h-4 text-[#e1b382]" /><span>{item}</span></div>)}
             </div>
             <button onClick={handleConnectClick} className="mt-7 px-6 py-3 rounded-lg bg-[#e1b382] text-[#12343b] font-bold text-sm inline-flex items-center gap-2">Talk to an Expert <ArrowRight className="w-4 h-4" /></button>
           </div>
