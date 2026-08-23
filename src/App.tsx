@@ -706,14 +706,14 @@ export default function App() {
                     services.slice(0, 3).map((svc, idx) => {
                       const IconComponent = getServiceIcon(svc.icon);
                       return (
-                        <div
-  key={svc.id}
-  onClick={() => {
-    setCurrentTab('services');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }}
-  className="premium-card p-5 rounded-2xl space-y-3 group hover:border-[#e1b382]/50 transition-all duration-200 flex flex-col justify-between cursor-pointer hover:-translate-y-1"
->
+                      <div
+                        key={svc.id}
+                        onClick={() => {
+                          setCurrentTab('services');
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                         className="premium-card p-5 rounded-2xl space-y-3 group hover:border-[#e1b382]/50 transition-all duration-200 flex flex-col justify-between cursor-pointer hover:-translate-y-1"
+                      >
                           <div className="space-y-3">
                             <div className="w-11 h-11 rounded-xl bg-[#12343b] border border-[#e1b382]/40 flex items-center justify-center shrink-0 text-[#e1b382] group-hover:border-[#e1b382] group-hover:scale-105 transition-all shadow-md">
                               <IconComponent className="w-5 h-5 text-[#e1b382] shrink-0" />
@@ -721,7 +721,7 @@ export default function App() {
                             <h4 className="text-base font-bold text-white group-hover:text-[#e1b382] transition-colors">{svc.title}</h4>
                             <p className="text-xs text-[#CBD5E1] leading-relaxed font-sans line-clamp-3">{svc.description}</p>
                           </div>
-                        </motion.div>
+                        </div>
                       );
                     })
                   )}
