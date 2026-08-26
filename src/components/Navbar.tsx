@@ -36,16 +36,20 @@ export default function Navbar({
     { id: 'contact', label: 'Contact' }
   ];
 
-  // When a public page is opened directly, select the matching view.
-  // Admin routes are intentionally ignored here.
+  // Select the matching public view only when the app first loads.
+  // Do not re-run this on currentTab changes, otherwise programmatic navigation
+  // (for example Products -> Book Demo -> Contact) gets immediately overwritten
+  // by the old URL path.
   useEffect(() => {
     const path = window.location.pathname.replace(/\/$/, '') || '/';
     const publicPath = path === '/' ? 'home' : path.slice(1);
     const isPublicPage = menuItems.some((item) => item.id === publicPath);
-    if (isPublicPage && currentTab !== publicPath) {
+    if (isPublicPage) {
       setCurrentTab(publicPath);
     }
-  }, [currentTab, setCurrentTab]);
+    // Intentionally run once on initial mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleNavClick = (tabId: string) => {
     const route = tabId === 'home' ? '/' : `/${tabId}`;
