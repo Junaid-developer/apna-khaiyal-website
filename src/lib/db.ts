@@ -1815,6 +1815,9 @@ export const dbStore = {
   getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
   saveCareers: (items: CareerOpportunity[]) => {
     setStored('careers', items);
+    // Careers are stored in the dedicated careers table as the primary source of truth.
+    // Keep website_settings as a backward-compatible mirror for older deployments.
+    syncTableToSupabase('careers', items);
     saveWebsiteSetting('careers', items);
   },
 
