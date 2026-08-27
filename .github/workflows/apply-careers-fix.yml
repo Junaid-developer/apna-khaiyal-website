@@ -27,10 +27,10 @@ jobs:
     if (!supabase || !isSupabaseConfigured) return;
 
     // Careers use the dedicated table as the single source of truth.
-    // Map the UI's camelCase fields to the actual careers table schema.
+    // Map the UI fields to the actual careers table schema.
     void (async () => {
       try {
-        const rows = (Array.isArray(items) ? items : []).map((item: CareerOpportunity) => ({
+        const rows = (Array.isArray(items) ? items : []).map((item: CareerOpportunity, index: number) => ({
           id: item.id,
           title: item.title || '',
           department: item.department || 'General',
@@ -44,7 +44,7 @@ jobs:
           is_active: item.active !== false,
           active: item.active !== false,
           isActive: item.active !== false,
-          displayOrder: (item as any).displayOrder ?? 0,
+          displayOrder: (item as any).displayOrder ?? index + 1,
           updated_at: new Date().toISOString()
         }));
 
@@ -68,22 +68,15 @@ jobs:
           if old not in s:
               raise SystemExit('saveCareers block not found')
           s = s.replace(old, new, 1)
-
-          old2 = "        if (row.key && row.key !== 'ceo_whatsapp_number') {"
-          new2 = "        if (row.key && row.key !== 'ceo_whatsapp_number' && row.key !== 'careers') {"
-          if old2 not in s:
-              raise SystemExit('website_settings merge guard not found')
-          s = s.replace(old2, new2, 1)
-
           p.write_text(s)
           PY
           git diff --check
       - name: Commit patched source
         run: |
-          rm -f .github/workflows/apply-careers-fix.yml
+          rm -f .github/workflows/apply-careers-fix.yml .github/workflows/apply-careers-single-source.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/db.ts .github/workflows/apply-careers-fix.yml
+          git add src/lib/db.ts .github/workflows/apply-careers-fix.yml .github/workflows/apply-careers-single-source.yml
           git diff --cached --quiet && exit 0
           git commit -m "Fix Careers persistence using dedicated table"
           git push
