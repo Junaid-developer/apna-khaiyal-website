@@ -1,1 +1,0 @@
-Temporary trigger for the one-time Careers persistence workflow. This file is removed automatically by the workflow.
