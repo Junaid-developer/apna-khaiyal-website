@@ -1499,7 +1499,7 @@ export const syncAllFromSupabase = async (userRole: string = 'Admin') => {
       // the website_settings / site_settings mirror (and finally local storage) instead of
       // treating "no rows from this table" as "no careers exist" — this is what was overwriting
       // saved jobs with stale/empty data on refresh.
-      if (true) {
+      if (normalizedCareersList.length === 0) {
         try {
           const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
           if (setRow && Array.isArray((setRow as any).value) && (setRow as any).value.length > 0) {
