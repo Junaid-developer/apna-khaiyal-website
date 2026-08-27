@@ -25,8 +25,12 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const activeJobs = opportunities.filter(op => op.active && op.type === 'job');
-  const activeInternships = opportunities.filter(op => op.active && op.type === 'internship');
+  // Guard against a non-array/undefined opportunities prop (e.g. during initial data
+  // loading) so the public Careers page never renders blank — it just shows the
+  // existing empty-state messaging below until data arrives.
+  const safeOpportunities = Array.isArray(opportunities) ? opportunities : [];
+  const activeJobs = safeOpportunities.filter(op => op && op.active && op.type === 'job');
+  const activeInternships = safeOpportunities.filter(op => op && op.active && op.type === 'internship');
 
   // Handle file selection and conversion to base64
   const processFile = (file: File) => {
