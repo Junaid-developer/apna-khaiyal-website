@@ -1,0 +1,36 @@
+name: Careers Persistence Fix
+
+on:
+  push:
+    branches: [fix/careers-persistence]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Careers persistence
+        env:
+          FILE: src/lib/db.ts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/lib/db.ts')
+          s=p.read_text()
+          old=r'''  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: \(items: CareerOpportunity\[\]\) => \{\n    setStored\('careers', items\);\n    // Careers are stored in the dedicated careers table as the primary source of truth\.\n    // Keep website_settings as a backward-compatible mirror for older deployments\.\n    saveWebsiteSetting\('careers', items\);\n  \},'''
+          new='''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),\n  saveCareers: async (items: CareerOpportunity[]) => {\n    // Careers must be additive/persistent: never replace the database array with a partial\n    // client-side list (which can happen when the Admin Panel has stale state).\n    const incoming = Array.isArray(items) ? items : [];\n    let existing: CareerOpportunity[] = [];\n\n    try {\n      if (supabase) {\n        const { data: row } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();\n        if (row && Array.isArray((row as any).value)) existing = (row as any).value as CareerOpportunity[];\n      }\n    } catch (e) {\n      console.warn('[Careers] existing settings read notice:', e);\n    }\n\n    const byId = new Map<string, CareerOpportunity>();\n    for (const job of existing) if (job?.id) byId.set(job.id, job);\n    for (const job of incoming) if (job?.id) byId.set(job.id, job);\n    const merged = Array.from(byId.values());\n\n    setStored('careers', merged);\n    await saveWebsiteSetting('careers', merged);\n\n    // Also persist the normalized records to the dedicated careers table.\n    if (supabase && merged.length) {\n      try {\n        const rows = merged.map((job: any) => ({\n          id: job.id,\n          title: job.title || '',\n          type: job.type || 'job',\n          department: job.department || 'General',\n          location: job.location || '',\n          description: job.description || '',\n          requirements: Array.isArray(job.requirements) ? job.requirements : [],\n          responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),\n          experience: job.experience || '',\n          is_active: job.active !== false,\n          active: job.active !== false,\n          isActive: job.active !== false\n        }));\n        const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });\n        if (error) console.warn('[Careers] dedicated table upsert notice:', error.message);\n      } catch (e) {\n        console.warn('[Careers] dedicated table sync notice:', e);\n      }\n    }\n    return merged;\n  },'''
+          ns,n=re.subn(old,new,s,count=1)
+          if n!=1: raise SystemExit('saveCareers block not found')
+          p.write_text(ns)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db.ts
+          git diff --cached --quiet || git commit -m "fix: make career saves additive and persistent"
+          git push

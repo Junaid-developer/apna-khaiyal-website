@@ -1499,7 +1499,7 @@ export const syncAllFromSupabase = async (userRole: string = 'Admin') => {
       // the website_settings / site_settings mirror (and finally local storage) instead of
       // treating "no rows from this table" as "no careers exist" — this is what was overwriting
       // saved jobs with stale/empty data on refresh.
-      if (true) {
+      if (normalizedCareersList.length === 0) {
         try {
           const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
           if (setRow && Array.isArray((setRow as any).value) && (setRow as any).value.length > 0) {
@@ -1834,11 +1834,53 @@ export const dbStore = {
   },
 
   getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
-  saveCareers: (items: CareerOpportunity[]) => {
-    setStored('careers', items);
-    // Careers are stored in the dedicated careers table as the primary source of truth.
-    // Keep website_settings as a backward-compatible mirror for older deployments.
-    saveWebsiteSetting('careers', items);
+  saveCareers: async (items: CareerOpportunity[]) => {
+    // Careers must be additive/persistent: never replace the database array with a partial
+    // client-side list (which can happen when the Admin Panel has stale state).
+    const incoming = Array.isArray(items) ? items : [];
+    let existing: CareerOpportunity[] = [];
+
+    try {
+      if (supabase) {
+        const { data: row } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
+        if (row && Array.isArray((row as any).value)) existing = (row as any).value as CareerOpportunity[];
+      }
+    } catch (e) {
+      console.warn('[Careers] existing settings read notice:', e);
+    }
+
+    const byId = new Map<string, CareerOpportunity>();
+    for (const job of existing) if (job?.id) byId.set(job.id, job);
+    for (const job of incoming) if (job?.id) byId.set(job.id, job);
+    const merged = Array.from(byId.values());
+
+    setStored('careers', merged);
+    await saveWebsiteSetting('careers', merged);
+
+    // Also persist the normalized records to the dedicated careers table.
+    if (supabase && merged.length) {
+      try {
+        const rows = merged.map((job: any) => ({
+          id: job.id,
+          title: job.title || '',
+          type: job.type || 'job',
+          department: job.department || 'General',
+          location: job.location || '',
+          description: job.description || '',
+          requirements: Array.isArray(job.requirements) ? job.requirements : [],
+          responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),
+          experience: job.experience || '',
+          is_active: job.active !== false,
+          active: job.active !== false,
+          isActive: job.active !== false
+        }));
+        const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
+        if (error) console.warn('[Careers] dedicated table upsert notice:', error.message);
+      } catch (e) {
+        console.warn('[Careers] dedicated table sync notice:', e);
+      }
+    }
+    return merged;
   },
 
   getApplications: (): JobApplication[] => getStored('applications', []),
