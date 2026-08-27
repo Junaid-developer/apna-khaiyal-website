@@ -323,10 +323,14 @@ export default function App() {
         if (Array.isArray(liveData.reviews) && liveData.reviews.length > 0) setReviews(liveData.reviews);
         if (liveData.careers) {
           const normCareers = Array.isArray(liveData.careers)
-            ? liveData.careers
-            : (liveData.careers && typeof liveData.careers === 'object' ? [liveData.careers] : []);
-          setCareers(normCareers);
-        }
+          ? liveData.careers
+          : (liveData.careers && typeof liveData.careers === 'object'
+           ? [liveData.careers]
+           : []);
+       if (normCareers.length > 0) {
+         setCareers(normCareers);
+       }
+     }
         if (liveData.applications) {
           const normApps = Array.isArray(liveData.applications)
             ? liveData.applications
