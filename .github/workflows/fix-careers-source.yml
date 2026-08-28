@@ -1,0 +1,46 @@
+name: Fix careers source consistency
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch careers source logic
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+
+          old = """      // Careers are saved by the Admin Panel as a complete merged array in website_settings.\n      // Prefer that authoritative snapshot over a potentially stale/partial dedicated-table read.\n      try {\n        const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();\n        if (setRow && Array.isArray((setRow as any).value) && (setRow as any).value.length > 0) {\n          normalizedCareersList = (setRow as any).value;\n        } else if (normalizedCareersList.length === 0) {\n          const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();\n          if (siteSetRow && Array.isArray((siteSetRow as any).value) && (siteSetRow as any).value.length > 0) {\n            normalizedCareersList = (siteSetRow as any).value;\n          }\n        }\n      } catch (careersFallbackErr) {\n        console.warn('[Supabase Sync] careers settings fallback notice:', careersFallbackErr);\n      }\n"""
+
+          new = """      // Careers exist in multiple legacy stores in this project. NEVER let a shorter\n      // website_settings/site_settings snapshot overwrite the complete careers table.\n      // Merge all available sources by ID, preserving the complete union of records.\n      try {\n        const sourceLists: any[][] = [];\n        if (Array.isArray(normalizedCareersList)) sourceLists.push(normalizedCareersList);\n\n        const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();\n        if (setRow && Array.isArray((setRow as any).value)) sourceLists.push((setRow as any).value);\n\n        const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();\n        if (siteSetRow && Array.isArray((siteSetRow as any).value)) sourceLists.push((siteSetRow as any).value);\n\n        const mergedById = new Map<string, any>();\n        for (const list of sourceLists) {\n          for (const item of list) {\n            if (!item) continue;\n            const id = String(item.id || '');\n            if (!id) continue;\n            const previous = mergedById.get(id);\n            // Keep the first (dedicated careers-table) record authoritative, while\n            // filling any missing fields from the settings mirrors.\n            mergedById.set(id, previous ? { ...item, ...previous } : item);\n          }\n        }\n        normalizedCareersList = Array.from(mergedById.values());\n      } catch (careersFallbackErr) {\n        console.warn('[Supabase Sync] careers multi-source merge notice:', careersFallbackErr);\n      }\n"""
+
+          if old not in s:
+              raise SystemExit('Expected sync block not found; refusing to modify file')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+      - name: Verify and commit
+        run: |
+          git diff --check
+          git diff -- src/lib/db.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db.ts
+          git commit -m "Fix careers multi-source overwrite" || true
+          git rm .github/workflows/fix-careers-source.yml || true
+          git add -A
+          git commit -m "Remove one-time careers fix workflow" || true
+          git push
