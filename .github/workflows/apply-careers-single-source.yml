@@ -1,111 +1,68 @@
-name: Repair Careers persistence
+name: Apply Careers Fix
 on:
   push:
-    branches: [fix/careers-persistence]
+    branches: [main]
 permissions:
   contents: write
 jobs:
-  repair:
+  fix:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Repair Careers persistence flow
+      - name: Patch Careers state source
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('src/lib/db.ts')
+          import re
+          p = Path('src/App.tsx')
           s = p.read_text()
+          pattern = r"\n        if \(liveData\.careers\) \{.*?\n     \}\n        if \(liveData\.applications\)"
+          replacement = '''
+        // Careers use the dedicated public careers table as the single runtime source.
+        // Legacy settings mirrors must never overwrite the careers state.
+        if (supabase && isSupabaseConfigured) {
+          const { data: careersRows, error: careersLoadError } = await supabase
+            .from('careers')
+            .select('*')
+            .order('created_at', { ascending: true });
 
-          start = s.index('    // 6.5. Careers')
-          end = s.index('    // 7. Job Applications', start)
-          new_block = '''    // 6.5. Careers — single source of truth: public.careers
-    if (!isTableAllowed('careers')) {
-      console.warn(`[RBAC Data Fetch Guard] Filtered out restricted table 'careers' for role '${rolePerms.role}'`);
-      permissionRestrictedTables.push('careers');
-      result.careers = getStored('careers', DEFAULT_CAREERS);
-    } else {
-      const { data: rawCareers, error: careersErr } = await supabase.from('careers').select('*').order('displayOrder', { ascending: true });
-      if (careersErr) {
-        console.warn('[Supabase Sync] careers query notice:', careersErr.message);
-        result.careers = getStored('careers', DEFAULT_CAREERS);
-      } else {
-        const mappedCareers = (rawCareers || []).map((item: any) => ({
-          id: item.id || '',
-          title: item.title || item.job_title || '',
-          type: item.type === 'internship' ? 'internship' : 'job',
-          department: item.department || 'General',
-          location: item.location || 'Bahawalpur, Pakistan',
-          description: item.description || '',
-          requirements: Array.isArray(item.requirements) ? item.requirements : [],
-          benefits: Array.isArray(item.benefits) ? item.benefits : (Array.isArray(item.responsibilities) ? item.responsibilities : []),
-          active: item.active ?? item.is_active ?? item.isActive ?? true
-        }));
-        setStored('careers', mappedCareers);
-        result.careers = mappedCareers;
-      }
-    }
-'''
-          s = s[:start] + new_block + s[end:]
-
-          old = '''  saveCareers: (items: CareerOpportunity[]) => {
-    setStored('careers', items);
-    // Careers are stored in the dedicated careers table as the primary source of truth.
-    // Keep website_settings as a backward-compatible mirror for older deployments.
-    saveWebsiteSetting('careers', items);
-  },'''
-          new = '''  saveCareers: (items: CareerOpportunity[]) => {
-    setStored('careers', items);
-
-    // Persist Careers directly to the same table used by the public Careers page.
-    // Do not mirror to website_settings: multiple storage sources caused refresh races.
-    if (supabase && isSupabaseConfigured) {
-      void (async () => {
-        const rows = items.map((item, index) => ({
-          id: item.id,
-          title: item.title,
-          department: item.department || 'General',
-          location: item.location || 'Bahawalpur, Pakistan',
-          type: item.type || 'job',
-          description: item.description || '',
-          requirements: item.requirements || [],
-          responsibilities: [],
-          benefits: item.benefits || [],
-          active: item.active ?? true,
-          is_active: item.active ?? true,
-          isActive: item.active ?? true,
-          displayOrder: index + 1
-        }));
-
-        const { error: upsertError } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
-        if (upsertError) {
-          console.error('[Careers] Failed to persist careers:', upsertError);
-          return;
+          if (careersLoadError) {
+            console.warn('[Careers] Direct careers table load failed:', careersLoadError.message);
+          } else if (Array.isArray(careersRows)) {
+            const mappedCareers: CareerOpportunity[] = careersRows.map((item: any) => ({
+              id: item.id || '',
+              title: item.title || item.job_title || '',
+              type: item.type === 'internship' ? 'internship' : 'job',
+              department: item.department || 'General',
+              location: item.location || 'Bahawalpur, Pakistan',
+              description: item.description || '',
+              requirements: Array.isArray(item.requirements) ? item.requirements : [],
+              benefits: Array.isArray(item.benefits)
+                ? item.benefits
+                : (Array.isArray(item.responsibilities) ? item.responsibilities : []),
+              active: item.active ?? item.is_active ?? item.isActive ?? true
+            }));
+            setCareers(mappedCareers);
+          }
         }
-
-        const ids = rows.map(row => row.id).filter(Boolean);
-        const { data: existing } = await supabase.from('careers').select('id');
-        const staleIds = (existing || []).map((row: any) => row.id).filter((id: string) => !ids.includes(id));
-        if (staleIds.length > 0) {
-          await supabase.from('careers').delete().in('id', staleIds);
-        }
-      })();
-    }
-  },'''
-          if old not in s:
-              raise SystemExit('saveCareers block not found')
-          s = s.replace(old, new, 1)
-          p.write_text(s)
+        if (liveData.applications)'''
+          ns, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('Careers state block not found')
+          p.write_text(ns)
           PY
-      - name: Verify
-        run: git diff --check
-      - name: Commit repair and clean up
+          git diff --check
+      - name: Build and commit
         shell: bash
         run: |
-          rm -f .github/workflows/apply-careers-single-source.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/db.ts .github/workflows/apply-careers-single-source.yml
+          npm ci
+          npm run build
+          rm -f .github/workflows/apply-careers-single-source.yml .github/workflows/repair-careers-now.yml .github/workflows/fix-careers-direct-load.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/App.tsx .github/workflows
           git diff --cached --quiet && exit 0
-          git commit -m "Fix Careers single-source persistence"
-          git push origin HEAD:fix/careers-persistence
+          git commit -m 'fix: load careers from authoritative careers table'
+          git push origin main
