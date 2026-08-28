@@ -6,110 +6,65 @@ permissions:
   contents: write
 jobs:
   repair:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply Careers single-source fix
+      - name: Apply targeted Careers refresh race fix
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('src/lib/db.ts')
+          p = Path('src/App.tsx')
           s = p.read_text()
+          old = '''  useEffect(() => {
+    const initSync = async () => {
+      setIsDataLoading(true);
+      const liveData = await syncAllFromSupabase();
+      if (liveData) {'''
+          new = '''  useEffect(() => {
+    let cancelled = false;
 
-          start = s.index('    // 6.5. Careers')
-          end = s.index('    // 7. Job Applications', start)
-          new_block = '''    // 6.5. Careers — single source of truth: public.careers
-    if (!isTableAllowed('careers')) {
-      console.warn(`[RBAC Data Fetch Guard] Filtered out restricted table 'careers' for role '${rolePerms.role}'`);
-      permissionRestrictedTables.push('careers');
-      result.careers = getStored('careers', DEFAULT_CAREERS);
-    } else {
-      const { data: rawCareers, error: careersErr } = await supabase.from('careers').select('*').order('displayOrder', { ascending: true });
-      if (careersErr) {
-        console.warn('[Supabase Sync] careers query notice:', careersErr.message);
-        result.careers = getStored('careers', DEFAULT_CAREERS);
-      } else {
-        const mappedCareers = (rawCareers || []).map((item: any) => ({
-          id: item.id || '',
-          title: item.title || item.job_title || '',
-          type: item.type === 'internship' ? 'internship' : 'job',
-          department: item.department || 'General',
-          location: item.location || 'Bahawalpur, Pakistan',
-          description: item.description || '',
-          requirements: Array.isArray(item.requirements) ? item.requirements : [],
-          benefits: Array.isArray(item.benefits) ? item.benefits : (Array.isArray(item.responsibilities) ? item.responsibilities : []),
-          active: item.active ?? item.is_active ?? item.isActive ?? true
-        }));
-        setStored('careers', mappedCareers);
-        result.careers = mappedCareers;
-      }
-    }
-'''
-          s = s[:start] + new_block + s[end:]
-
-          old = '''  saveCareers: (items: CareerOpportunity[]) => {
-    setStored('careers', items);
-    // Careers are stored in the dedicated careers table as the primary source of truth.
-    // Keep website_settings as a backward-compatible mirror for older deployments.
-    saveWebsiteSetting('careers', items);
-  },'''
-          new = '''  saveCareers: (items: CareerOpportunity[]) => {
-    setStored('careers', items);
-    if (!supabase || !isSupabaseConfigured) return;
-
-    void (async () => {
-      try {
-        const rows = (Array.isArray(items) ? items : []).map((item: CareerOpportunity, index: number) => ({
-          id: item.id,
-          title: item.title || '',
-          department: item.department || 'General',
-          location: item.location || 'Bahawalpur, Pakistan',
-          type: item.type || 'job',
-          experience: (item as any).experience || '',
-          description: item.description || '',
-          requirements: Array.isArray(item.requirements) ? item.requirements : [],
-          responsibilities: Array.isArray(item.benefits) ? item.benefits : [],
-          benefits: Array.isArray(item.benefits) ? item.benefits : [],
-          is_active: item.active !== false,
-          active: item.active !== false,
-          isActive: item.active !== false,
-          displayOrder: (item as any).displayOrder ?? index + 1,
-          updated_at: new Date().toISOString()
-        }));
-
-        const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
-        if (existingErr) throw existingErr;
-        const incomingIds = rows.map(r => r.id);
-        const removedIds = (existing || []).map((r: any) => r.id).filter((id: string) => !incomingIds.includes(id));
-        if (removedIds.length) {
-          const { error } = await supabase.from('careers').delete().in('id', removedIds);
-          if (error) throw error;
-        }
-        if (rows.length) {
-          const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
-          if (error) throw error;
-        }
-      } catch (error) {
-        console.error('[Careers Persistence] Failed saving careers:', error);
-      }
-    })();
-  },'''
+    const initSync = async () => {
+      setIsDataLoading(true);
+      const liveData = await syncAllFromSupabase();
+      if (liveData && !cancelled) {'''
           if old not in s:
-              raise SystemExit('saveCareers block not found')
+              raise SystemExit('initSync start block not found')
           s = s.replace(old, new, 1)
+
+          old2 = '''      setIsDataLoading(false);
+    };
+    initSync();
+  }, []);'''
+          new2 = '''      if (!cancelled) setIsDataLoading(false);
+    };
+    void initSync();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);'''
+          if old2 not in s:
+              raise SystemExit('initSync cleanup block not found')
+          s = s.replace(old2, new2, 1)
+
           p.write_text(s)
           PY
           git diff --check
+      - name: Build
+        run: |
+          npm ci
+          npm run build
       - name: Commit fix and clean up
         shell: bash
         run: |
           rm -f .github/workflows/repair-careers-now.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/db.ts .github/workflows/repair-careers-now.yml
+          git add src/App.tsx .github/workflows/repair-careers-now.yml
           git diff --cached --quiet && exit 0
-          git commit -m "Fix Careers persistence single source"
-          git push
+          git commit -m "Fix Careers async refresh race"
+          git push origin main
