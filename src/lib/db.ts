@@ -1499,6 +1499,23 @@ export const syncAllFromSupabase = async (userRole: string = 'Admin') => {
       // the website_settings / site_settings mirror (and finally local storage) instead of
       // treating "no rows from this table" as "no careers exist" — this is what was overwriting
       // saved jobs with stale/empty data on refresh.
+      // Careers are saved by the Admin Panel as a complete merged array in website_settings.
+      // Prefer that authoritative snapshot over a potentially stale/partial dedicated-table read.
+      try {
+        const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
+        if (setRow && Array.isArray((setRow as any).value) && (setRow as any).value.length > 0) {
+          normalizedCareersList = (setRow as any).value;
+        } else if (normalizedCareersList.length === 0) {
+          const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();
+          if (siteSetRow && Array.isArray((siteSetRow as any).value) && (siteSetRow as any).value.length > 0) {
+            normalizedCareersList = (siteSetRow as any).value;
+          }
+        }
+      } catch (careersFallbackErr) {
+        console.warn('[Supabase Sync] careers settings fallback notice:', careersFallbackErr);
+      }
+
+      /* legacy fallback retained below only when the authoritative snapshot is unavailable */
       if (normalizedCareersList.length === 0) {
         try {
           const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
