@@ -1739,8 +1739,11 @@ export const syncAllFromSupabase = async (userRole: string = 'Admin') => {
       });
     }
 
-    // Store all combined settings
+    // Store combined settings, but NEVER overwrite the authoritative careers result.
+    // Careers are loaded from the dedicated careers table above and may be more complete
+    // than legacy website_settings/site_settings mirrors.
     Object.keys(combinedSettingsMap).forEach((key) => {
+      if (key === 'careers') return;
       setStored(key, combinedSettingsMap[key]);
       result[key] = combinedSettingsMap[key];
     });
