@@ -1499,20 +1499,34 @@ export const syncAllFromSupabase = async (userRole: string = 'Admin') => {
       // the website_settings / site_settings mirror (and finally local storage) instead of
       // treating "no rows from this table" as "no careers exist" — this is what was overwriting
       // saved jobs with stale/empty data on refresh.
-      // Careers are saved by the Admin Panel as a complete merged array in website_settings.
-      // Prefer that authoritative snapshot over a potentially stale/partial dedicated-table read.
+      // Careers exist in multiple legacy stores in this project. NEVER let a shorter
+      // website_settings/site_settings snapshot overwrite the complete careers table.
+      // Merge all available sources by ID, preserving the complete union of records.
       try {
+        const sourceLists: any[][] = [];
+        if (Array.isArray(normalizedCareersList)) sourceLists.push(normalizedCareersList);
+
         const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
-        if (setRow && Array.isArray((setRow as any).value) && (setRow as any).value.length > 0) {
-          normalizedCareersList = (setRow as any).value;
-        } else if (normalizedCareersList.length === 0) {
-          const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();
-          if (siteSetRow && Array.isArray((siteSetRow as any).value) && (siteSetRow as any).value.length > 0) {
-            normalizedCareersList = (siteSetRow as any).value;
+        if (setRow && Array.isArray((setRow as any).value)) sourceLists.push((setRow as any).value);
+
+        const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();
+        if (siteSetRow && Array.isArray((siteSetRow as any).value)) sourceLists.push((siteSetRow as any).value);
+
+        const mergedById = new Map<string, any>();
+        for (const list of sourceLists) {
+          for (const item of list) {
+            if (!item) continue;
+            const id = String(item.id || '');
+            if (!id) continue;
+            const previous = mergedById.get(id);
+            // Keep the first (dedicated careers-table) record authoritative, while
+            // filling any missing fields from the settings mirrors.
+            mergedById.set(id, previous ? { ...item, ...previous } : item);
           }
         }
+        normalizedCareersList = Array.from(mergedById.values());
       } catch (careersFallbackErr) {
-        console.warn('[Supabase Sync] careers settings fallback notice:', careersFallbackErr);
+        console.warn('[Supabase Sync] careers multi-source merge notice:', careersFallbackErr);
       }
 
       /* legacy fallback retained below only when the authoritative snapshot is unavailable */
