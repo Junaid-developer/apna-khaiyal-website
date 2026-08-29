@@ -216,9 +216,10 @@ export default function DashboardOverview({
     ? liveMetrics.rawCareers 
     : (Array.isArray(careers) ? careers : []);
 
-  const safeApplications = Array.isArray(liveMetrics?.rawJobApplications) 
-    ? liveMetrics.rawJobApplications 
-    : (Array.isArray(applications) ? applications : []);
+  const safeApplications =
+    Array.isArray(liveMetrics?.rawJobApplications) && liveMetrics.rawJobApplications.length > 0
+      ? liveMetrics.rawJobApplications
+      : (Array.isArray(applications) ? applications : []);
 
   const safeMessages = Array.isArray(liveMetrics?.rawContactMessages) 
     ? liveMetrics.rawContactMessages 
@@ -373,7 +374,7 @@ export default function DashboardOverview({
         description: `${a.applicant_name || a.applicantName || 'Applicant'} applied for ${a.job_title || a.jobTitle || 'Role'}`,
         timestamp: a.createdAt ? new Date(a.createdAt).toLocaleDateString() : 'Recent',
         category: 'job_application',
-        targetTab: 'careers',
+        targetTab: 'job-applications',
         isRead: true
       });
     });
