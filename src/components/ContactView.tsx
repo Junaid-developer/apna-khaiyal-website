@@ -72,7 +72,7 @@ export default function ContactView({
       : message;
 
     const newMsg: ContactMessage = {
-      id: `msg_${Date.now()}`,
+      id: crypto.randomUUID(),
       name,
       email,
       subject: compiledSubject,
