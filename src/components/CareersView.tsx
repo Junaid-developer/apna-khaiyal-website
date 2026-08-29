@@ -99,7 +99,7 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
     }
 
     const newApp: JobApplication = {
-      id: `app_${Date.now()}`,
+      id: crypto.randomUUID(),
       jobId: selectedJob?.id || 'general',
       jobTitle: selectedJob?.title || 'General Application',
       fullName,
