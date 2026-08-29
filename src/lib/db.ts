@@ -977,6 +977,37 @@ const syncTableToSupabase = async (tableName: string, data: any) => {
     // Format individual fields for schema compatibility
     const formattedData = incomingArray.map((item: any) => ({ ...item }));
 
+    // Contact form submissions are append-only. Map frontend camelCase fields
+    // to the actual contact_messages schema and never destructively sync them.
+    if (tableName === 'contact_messages') {
+      const messageRows = formattedData.map((item: any) => ({
+        id: item.id || crypto.randomUUID(),
+        name: item.name || '',
+        email: item.email || '',
+        subject: item.subject || '',
+        message: item.message || '',
+        service_interest: item.service_interest ?? item.serviceInterest ?? null,
+        phone: item.phone ?? null,
+        company: item.company ?? null,
+        read: item.read ?? false,
+        replied: item.replied ?? (item.repliedStatus === 'Replied'),
+        admin_notes: item.admin_notes ?? item.adminNotes ?? null,
+        created_at: item.created_at ?? item.createdAt ?? new Date().toISOString()
+      })).filter((row: any) => row.name && row.email && row.subject && row.message);
+
+      if (messageRows.length > 0) {
+        const { error: messageUpsertErr } = await supabase
+          .from('contact_messages')
+          .upsert(messageRows, { onConflict: 'id' });
+        if (messageUpsertErr) {
+          console.error('[Contact Messages] Supabase upsert failed:', messageUpsertErr.message);
+        } else {
+          console.log('[Contact Messages] Saved messages without deleting existing records.');
+        }
+      }
+      return;
+    }
+
     // Job applications are append-only from the public Careers form. Do not delete
     // existing applications when the caller has a stale/partial local array.
     // Also map the frontend camelCase fields to the actual Supabase schema.
