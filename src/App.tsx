@@ -335,7 +335,10 @@ export default function App() {
           const normApps = Array.isArray(liveData.applications)
             ? liveData.applications
             : (liveData.applications && typeof liveData.applications === 'object' ? [liveData.applications] : []);
-          setApplications(normApps);
+          // Never wipe locally loaded applications when Supabase returns an empty/temporary response.
+          if (normApps.length > 0) {
+            setApplications(normApps);
+          }
         }
         if (Array.isArray(liveData.messages) && liveData.messages.length > 0) setMessages(liveData.messages);
         if (liveData.settings) setSettings(liveData.settings);
