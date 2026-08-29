@@ -977,6 +977,37 @@ const syncTableToSupabase = async (tableName: string, data: any) => {
     // Format individual fields for schema compatibility
     const formattedData = incomingArray.map((item: any) => ({ ...item }));
 
+    // Job applications are append-only from the public Careers form. Do not delete
+    // existing applications when the caller has a stale/partial local array.
+    // Also map the frontend camelCase fields to the actual Supabase schema.
+    if (tableName === 'job_applications') {
+      const applicationRows = formattedData.map((item: any) => ({
+        id: item.id,
+        job_id: item.job_id ?? item.jobId ?? null,
+        job_title: item.job_title ?? item.jobTitle ?? 'General Application',
+        applicant_name: item.applicant_name ?? item.fullName ?? item.applicantName ?? '',
+        email: item.email ?? item.applicant_email ?? item.applicantEmail ?? '',
+        phone: item.phone ?? '',
+        experience: item.experience ?? '',
+        cover_note: item.cover_note ?? item.coverLetter ?? item.cover_note ?? '',
+        resume_url: item.resume_url ?? item.resumeUrl ?? '',
+        status: item.status ?? 'New',
+        created_at: item.created_at ?? item.appliedAt ?? new Date().toISOString()
+      })).filter((row: any) => row.applicant_name && row.email);
+
+      if (applicationRows.length > 0) {
+        const { error: applicationUpsertErr } = await supabase
+          .from('job_applications')
+          .upsert(applicationRows, { onConflict: 'id' });
+        if (applicationUpsertErr) {
+          console.error('[Job Applications] Supabase upsert failed:', applicationUpsertErr.message);
+        } else {
+          console.log('[Job Applications] Saved applications without deleting existing records.');
+        }
+      }
+      return;
+    }
+
     // 1. Fetch current IDs from database to find removed rows
     const { data: existing, error: getErr } = await supabase.from(tableName).select('id');
     if (!getErr && existing) {
