@@ -1,10 +1,74 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Layers, Sparkles } from 'lucide-react';
 import { ProductItem } from '../types';
 
 interface ProductsViewProps { products: ProductItem[]; isLoading?: boolean; onBookDemo?: (productName: string) => void; }
 
-const getProductDashboardImage = (name: string, customImg?: string, gallery?: string[]) => customImg?.trim() || gallery?.find(Boolean) || '';
+const getProductImages = (customImg?: string, gallery?: string[]) =>
+  Array.from(new Set([...(customImg?.trim() ? [customImg.trim()] : []), ...(gallery || []).filter(Boolean)]));
+
+function ProductImageSlider({ product }: { product: ProductItem }) {
+  const images = getProductImages(product.image, product.gallery);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [product.id]);
+
+  useEffect(() => {
+    if (images.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setActiveIndex(current => (current + 1) % images.length);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [product.id, images.length]);
+
+  return (
+    <div className="relative aspect-[16/10] overflow-hidden border-b border-[#3f6973] bg-[#214b55]">
+      {images.length > 0 ? (
+        <>
+          <div className="absolute inset-0">
+            {images.map((src, index) => (
+              <img
+                key={src + index}
+                src={src}
+                alt={`${product.name} Dashboard Mockup ${index + 1}`}
+                loading={index === 0 ? 'eager' : 'lazy'}
+                decoding="async"
+                referrerPolicy="no-referrer"
+                className={`absolute inset-0 w-full h-full object-cover opacity-90 transition-opacity duration-700 ${index === activeIndex ? 'opacity-90' : 'opacity-0'}`}
+              />
+            ))}
+          </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-[#12343b] via-transparent to-transparent opacity-80" />
+          {images.length > 1 && (
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+              {images.map((_, index) => (
+                <span key={index} className={`h-1.5 rounded-full transition-all ${index === activeIndex ? 'w-5 bg-[#e1b382]' : 'w-1.5 bg-white/60'}`} />
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <Layers className="w-16 h-16 text-[#e1b382]/70" />
+        </div>
+      )}
+
+      <div className="absolute top-4 left-4 right-4 flex justify-between gap-2">
+        <span className="text-[10px] sm:text-xs font-mono font-bold uppercase text-[#e1b382] bg-[#12343b]/95 px-2.5 py-1 rounded-md border border-[#e1b382]/35">{product.category}</span>
+        <span className="text-[10px] sm:text-xs font-mono font-bold uppercase px-2.5 py-1 rounded-md bg-[#12343b]/95 text-emerald-400 border border-emerald-500/60">● {product.status}</span>
+      </div>
+
+      <div className="absolute bottom-4 left-4 right-4 flex items-center gap-3">
+        <div className="w-12 h-12 shrink-0 rounded-2xl bg-[#12343b]/95 border border-[#e1b382]/40 flex items-center justify-center font-bold text-[#e1b382] overflow-hidden p-1">
+          {product.logoUrl ? <img src={product.logoUrl} alt="" loading="lazy" decoding="async" className="w-full h-full object-contain" referrerPolicy="no-referrer" /> : <span className="text-xs font-mono">{product.logoText}</span>}
+        </div>
+        <h3 className="text-base font-bold text-white leading-tight">{product.name}</h3>
+      </div>
+    </div>
+  );
+}
 
 export default function ProductsView({ products, onBookDemo }: ProductsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -25,21 +89,20 @@ export default function ProductsView({ products, onBookDemo }: ProductsViewProps
         </div>
 
         <div id="products-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map(prod => {
-            const image = getProductDashboardImage(prod.name, prod.image, prod.gallery);
-            return <article key={prod.id} id={`product-card-${prod.id}`} onClick={() => setActiveProductModal(prod)} className="premium-card rounded-3xl overflow-hidden flex flex-col group cursor-pointer">
-              <div className="relative aspect-[16/10] overflow-hidden border-b border-[#3f6973] bg-[#214b55]">
-                {image ? <img src={image} alt={`${prod.name} Dashboard Mockup`} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="w-full h-full object-cover opacity-90" /> : <div className="w-full h-full flex items-center justify-center"><Layers className="w-16 h-16 text-[#e1b382]/70" /></div>}
-                <div className="absolute inset-0 bg-gradient-to-t from-[#12343b] via-transparent to-transparent opacity-80" />
-                <div className="absolute top-4 left-4 right-4 flex justify-between gap-2"><span className="text-[10px] sm:text-xs font-mono font-bold uppercase text-[#e1b382] bg-[#12343b]/95 px-2.5 py-1 rounded-md border border-[#e1b382]/35">{prod.category}</span><span className="text-[10px] sm:text-xs font-mono font-bold uppercase px-2.5 py-1 rounded-md bg-[#12343b]/95 text-emerald-400 border border-emerald-500/60">● {prod.status}</span></div>
-                <div className="absolute bottom-4 left-4 right-4 flex items-center gap-3"><div className="w-12 h-12 shrink-0 rounded-2xl bg-[#12343b]/95 border border-[#e1b382]/40 flex items-center justify-center font-bold text-[#e1b382] overflow-hidden p-1">{prod.logoUrl ? <img src={prod.logoUrl} alt="" loading="lazy" decoding="async" className="w-full h-full object-contain" referrerPolicy="no-referrer" /> : <span className="text-xs font-mono">{prod.logoText}</span>}</div><h3 className="text-base font-bold text-white leading-tight">{prod.name}</h3></div>
-              </div>
+          {filtered.map(prod => (
+            <article key={prod.id} id={`product-card-${prod.id}`} onClick={() => setActiveProductModal(prod)} className="premium-card rounded-3xl overflow-hidden flex flex-col group cursor-pointer">
+              <ProductImageSlider product={prod} />
               <div className="p-6 flex-grow flex flex-col justify-between gap-6">
-                <div><p className="text-[#94A3B8] text-xs sm:text-sm leading-relaxed mb-6">{prod.description}</p><span className="text-[10px] font-mono text-[#94A3B8] uppercase block mb-2">Core Framework Features</span><div className="space-y-2">{(prod.features || []).slice(0, 3).map((feat, i) => <div key={i} className="flex items-start gap-2 text-xs"><Check className="w-3.5 h-3.5 text-[#e1b382] shrink-0" /><span>{feat}</span></div>)}</div></div>
-                <div className="grid grid-cols-2 gap-2.5"><button onClick={e => { e.stopPropagation(); setActiveProductModal(prod); }} id={`prod-details-trigger-${prod.id}`} className="py-3 rounded-xl bg-[#12343b] text-[#CBD5E1] border border-[#3f6973] text-xs font-semibold uppercase">Details</button><button onClick={e => { e.stopPropagation(); onBookDemo?.(prod.name); }} id={`prod-book-demo-btn-${prod.id}`} className="py-3 rounded-xl bg-[#e1b382] text-[#12343b] border border-[#e1b382] text-xs font-bold uppercase">Book Demo</button></div>
+                <div>
+                  <p className="text-[#94A3B8] text-xs sm:text-sm leading-relaxed mb-6">{prod.description}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button onClick={e => { e.stopPropagation(); setActiveProductModal(prod); }} id={`prod-details-trigger-${prod.id}`} className="py-3 rounded-xl bg-[#12343b] text-[#CBD5E1] border border-[#3f6973] text-xs font-semibold uppercase">Details</button>
+                  <button onClick={e => { e.stopPropagation(); onBookDemo?.(prod.name); }} id={`prod-book-demo-btn-${prod.id}`} className="py-3 rounded-xl bg-[#e1b382] text-[#12343b] border border-[#e1b382] text-xs font-bold uppercase">Book Demo</button>
+                </div>
               </div>
-            </article>;
-          })}
+            </article>
+          ))}
         </div>
 
         {activeProductModal && <div id="product-lightbox-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85" onClick={() => setActiveProductModal(null)}><div className="bg-[#2d545e] border border-[#3f6973] rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 sm:p-8 relative" onClick={e => e.stopPropagation()}><button onClick={() => setActiveProductModal(null)} className="absolute top-4 right-4 w-9 h-9 rounded-full bg-[#12343b] text-white">✕</button><div className="flex items-center gap-3 mb-6"><Sparkles className="w-6 h-6 text-[#e1b382]" /><div><h3 className="text-2xl font-bold">{activeProductModal.name}</h3><p className="text-[#94A3B8] text-sm">{activeProductModal.category}</p></div></div><p className="text-[#CBD5E1] leading-relaxed">{activeProductModal.description}</p><div className="mt-6 space-y-2">{(activeProductModal.features || []).map((f, i) => <div key={i} className="flex gap-2 text-sm"><Check className="w-4 h-4 text-[#e1b382] shrink-0" />{f}</div>)}</div><button onClick={() => onBookDemo?.(activeProductModal.name)} className="mt-8 px-6 py-3 rounded-lg bg-[#e1b382] text-[#12343b] font-bold">Book Demo</button></div></div>}
