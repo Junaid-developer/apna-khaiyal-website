@@ -3765,6 +3765,54 @@ export default function AdminPanel({
                       />
                     </div>
 
+                    {/* PRODUCT_FEATURES_EDITOR_V1: Admin-editable detail bullets shown with check marks in Product Details */}
+                    <div className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <label className="block text-[10px] font-mono text-[#D4AF37] uppercase font-bold tracking-wider">Product Details — Checkmark Text</label>
+                          <p className="text-[9px] text-neutral-500 mt-1">Edit the text that appears with the ✓ marks inside this product's Details popup. Each row is one bullet.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditingProduct({ ...editingProduct, features: [...(editingProduct.features || []), ''] })}
+                          className="px-3 py-1.5 rounded-lg bg-[#D4AF37]/10 hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-[#D4AF37] text-[10px] font-bold uppercase tracking-wider transition-all shrink-0"
+                        >
+                          + Add Bullet
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {(editingProduct.features || []).length === 0 ? (
+                          <p className="text-[10px] text-neutral-500 italic">No detail bullets yet. Click “Add Bullet” to create one.</p>
+                        ) : (
+                          (editingProduct.features || []).map((feature, index) => (
+                            <div key={`product-feature-${index}`} className="flex items-center gap-2">
+                              <span className="w-7 h-7 rounded-lg bg-[#D4AF37]/10 border border-[#D4AF37]/20 text-[#D4AF37] flex items-center justify-center text-xs font-bold shrink-0">✓</span>
+                              <input
+                                type="text"
+                                value={feature}
+                                placeholder={`Detail bullet ${index + 1}`}
+                                onChange={(e) => {
+                                  const nextFeatures = [...(editingProduct.features || [])];
+                                  nextFeatures[index] = e.target.value;
+                                  setEditingProduct({ ...editingProduct, features: nextFeatures });
+                                }}
+                                className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-800 focus:border-[#D4AF37] rounded-xl text-xs text-white focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                aria-label={`Remove detail bullet ${index + 1}`}
+                                onClick={() => setEditingProduct({ ...editingProduct, features: (editingProduct.features || []).filter((_, i) => i !== index) })}
+                                className="w-8 h-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 flex items-center justify-center text-sm shrink-0"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 gap-4">
                       <div>
                         <label className="block text-[10px] font-mono text-neutral-500 uppercase mb-1">Category</label>
