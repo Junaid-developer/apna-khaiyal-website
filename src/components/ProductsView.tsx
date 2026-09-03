@@ -4,11 +4,23 @@ import { ProductItem } from '../types';
 
 interface ProductsViewProps { products: ProductItem[]; isLoading?: boolean; onBookDemo?: (productName: string) => void; }
 
-const getProductImages = (customImg?: string, gallery?: string[]) =>
-  Array.from(new Set([...(customImg?.trim() ? [customImg.trim()] : []), ...(gallery || []).filter(Boolean)]));
+const getProductImages = (product: ProductItem) => {
+  const relationalImages = (product.productImages || [])
+    .slice()
+    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+    .map(item => item.imageUrl)
+    .filter(Boolean);
+
+  return Array.from(new Set([
+    ...(product.image?.trim() ? [product.image.trim()] : []),
+    ...(product.gallery || []).filter(Boolean),
+    ...(product.images || []).filter(Boolean),
+    ...relationalImages
+  ]));
+};
 
 function ProductImageSlider({ product }: { product: ProductItem }) {
-  const images = getProductImages(product.image, product.gallery);
+  const images = getProductImages(product);
   const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
@@ -36,7 +48,7 @@ function ProductImageSlider({ product }: { product: ProductItem }) {
                 loading={index === 0 ? 'eager' : 'lazy'}
                 decoding="async"
                 referrerPolicy="no-referrer"
-                className={`absolute inset-0 w-full h-full object-cover opacity-90 transition-opacity duration-700 ${index === activeIndex ? 'opacity-90' : 'opacity-0'}`}
+                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${index === activeIndex ? 'opacity-90' : 'opacity-0'}`}
               />
             ))}
           </div>
