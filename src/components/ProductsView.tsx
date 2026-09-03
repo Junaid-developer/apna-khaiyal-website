@@ -127,8 +127,8 @@ function ProductImageSlider({ product }: { product: ProductItem }) {
       </div>
 
       <div className="absolute bottom-4 left-4 right-4 flex items-center gap-3">
-        <div className="w-12 h-12 shrink-0 rounded-2xl bg-[#12343b]/95 border border-[#e1b382]/40 flex items-center justify-center font-bold text-[#e1b382] overflow-hidden p-1">
-          {product.logoUrl ? <img src={product.logoUrl} alt="" loading="lazy" decoding="async" className="w-full h-full object-contain" referrerPolicy="no-referrer" /> : <span className="text-xs font-mono">{product.logoText}</span>}
+        <div className="w-12 h-12 shrink-0 rounded-2xl bg-transparent border-0 flex items-center justify-center font-bold text-[#e1b382] overflow-hidden p-0">
+          {product.logoUrl ? <img src={product.logoUrl} alt="" loading="lazy" decoding="async" className="w-full h-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]" referrerPolicy="no-referrer" /> : <span className="text-xs font-mono">{product.logoText}</span>}
         </div>
         <h3 className="text-base font-bold text-white leading-tight">{product.name}</h3>
       </div>
