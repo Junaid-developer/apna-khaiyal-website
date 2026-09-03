@@ -140,7 +140,16 @@ export default function ProductsView({ products, onBookDemo }: ProductsViewProps
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeProductModal, setActiveProductModal] = useState<ProductItem | null>(null);
   const categories = ['All', ...Array.from(new Set(products.map(p => p.category).filter(Boolean)))];
-  const filtered = selectedCategory === 'All' ? products : products.filter(p => p.category === selectedCategory);
+  // Keep the exact Admin Panel displayOrder on every load. Supabase does not guarantee
+  // row order unless an explicit order is requested, so sort a fresh copy here without
+  // mutating the original products state.
+  const orderedProducts = [...products].sort((a, b) => {
+    const orderA = Number.isFinite(Number(a.displayOrder)) ? Number(a.displayOrder) : Number.MAX_SAFE_INTEGER;
+    const orderB = Number.isFinite(Number(b.displayOrder)) ? Number(b.displayOrder) : Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+  const filtered = selectedCategory === 'All' ? orderedProducts : orderedProducts.filter(p => p.category === selectedCategory);
 
   return (
     <main id="products-page" className="bg-[#12343b] text-white min-h-screen pt-20 sm:pt-24 pb-16 font-sans">
