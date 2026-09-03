@@ -1,8 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Check, Layers, Sparkles } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Layers, Sparkles } from 'lucide-react';
 import { ProductItem } from '../types';
 
 interface ProductsViewProps { products: ProductItem[]; isLoading?: boolean; onBookDemo?: (productName: string) => void; }
+
+// Demo screenshots are used only when a product currently has fewer than 3 images.
+// Real images from Admin Panel / Supabase always stay first and are never replaced.
+const DEMO_PRODUCT_IMAGES = [
+  'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=85',
+  'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=85',
+  'https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1200&q=85',
+  'https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=1200&q=85'
+];
 
 const getProductImages = (product: ProductItem) => {
   const relationalImages = (product.productImages || [])
@@ -11,12 +20,21 @@ const getProductImages = (product: ProductItem) => {
     .map(item => item.imageUrl)
     .filter(Boolean);
 
-  return Array.from(new Set([
+  const realImages = Array.from(new Set([
     ...(product.image?.trim() ? [product.image.trim()] : []),
     ...(product.gallery || []).filter(Boolean),
     ...(product.images || []).filter(Boolean),
     ...relationalImages
   ]));
+
+  // Add demo images so every card visibly demonstrates the carousel.
+  // Once real gallery images are added in Admin Panel, those real images are used instead.
+  if (realImages.length >= 3) return realImages;
+
+  return Array.from(new Set([
+    ...realImages,
+    ...DEMO_PRODUCT_IMAGES
+  ])).slice(0, 4);
 };
 
 function ProductImageSlider({ product }: { product: ProductItem }) {
@@ -35,6 +53,16 @@ function ProductImageSlider({ product }: { product: ProductItem }) {
     return () => window.clearInterval(timer);
   }, [product.id, images.length]);
 
+  const goToPrevious = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveIndex(current => (current - 1 + images.length) % images.length);
+  };
+
+  const goToNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveIndex(current => (current + 1) % images.length);
+  };
+
   return (
     <div className="relative aspect-[16/10] overflow-hidden border-b border-[#3f6973] bg-[#214b55]">
       {images.length > 0 ? (
@@ -52,13 +80,39 @@ function ProductImageSlider({ product }: { product: ProductItem }) {
               />
             ))}
           </div>
-          <div className="absolute inset-0 bg-gradient-to-t from-[#12343b] via-transparent to-transparent opacity-80" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#12343b] via-transparent to-transparent opacity-80 pointer-events-none" />
+
           {images.length > 1 && (
-            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-              {images.map((_, index) => (
-                <span key={index} className={`h-1.5 rounded-full transition-all ${index === activeIndex ? 'w-5 bg-[#e1b382]' : 'w-1.5 bg-white/60'}`} />
-              ))}
-            </div>
+            <>
+              <button
+                type="button"
+                aria-label={`Previous image for ${product.name}`}
+                onClick={goToPrevious}
+                className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#12343b]/85 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#12343b]"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                aria-label={`Next image for ${product.name}`}
+                onClick={goToNext}
+                className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#12343b]/85 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#12343b]"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+                {images.map((_, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    aria-label={`Show image ${index + 1} of ${product.name}`}
+                    onClick={e => { e.stopPropagation(); setActiveIndex(index); }}
+                    className={`h-1.5 rounded-full transition-all ${index === activeIndex ? 'w-5 bg-[#e1b382]' : 'w-1.5 bg-white/60'}`}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </>
       ) : (
