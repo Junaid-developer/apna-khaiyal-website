@@ -1,4 +1,4 @@
-name: Add Product Features Editor
+name: Rollback Product Save Patch
 
 on:
   push:
@@ -8,61 +8,22 @@ permissions:
   contents: write
 
 jobs:
-  patch-admin-product-editor:
+  rollback-bad-save-patch:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Add product features editor if missing
-        shell: python
-        run: |
-          from pathlib import Path
-
-          path = Path('src/components/AdminPanel.tsx')
-          text = path.read_text(encoding='utf-8')
-
-          marker = 'PRODUCT_FEATURES_EDITOR_V1'
-          if marker in text:
-              print('Product features editor already installed.')
-              raise SystemExit(0)
-
-          anchor = '''                    <div className="grid grid-cols-1 gap-4">\n                      <div>\n                        <label className="block text-[10px] font-mono text-neutral-500 uppercase mb-1">Category</label>'''
-
-          insert = '''                    {/* PRODUCT_FEATURES_EDITOR_V1: Admin-editable detail bullets shown with check marks in Product Details */}\n                    <div className="bg-neutral-900/40 border border-neutral-800 p-4 rounded-2xl space-y-3">\n                      <div className="flex items-center justify-between gap-3">\n                        <div>\n                          <label className="block text-[10px] font-mono text-[#D4AF37] uppercase font-bold tracking-wider">Product Details — Checkmark Text</label>\n                          <p className="text-[9px] text-neutral-500 mt-1">Edit the text that appears with the ✓ marks inside this product's Details popup. Each row is one bullet.</p>\n                        </div>\n                        <button\n                          type="button"\n                          onClick={() => setEditingProduct({ ...editingProduct, features: [...(editingProduct.features || []), ''] })}\n                          className="px-3 py-1.5 rounded-lg bg-[#D4AF37]/10 hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-[#D4AF37] text-[10px] font-bold uppercase tracking-wider transition-all shrink-0"\n                        >\n                          + Add Bullet\n                        </button>\n                      </div>\n\n                      <div className="space-y-2">\n                        {(editingProduct.features || []).length === 0 ? (\n                          <p className="text-[10px] text-neutral-500 italic">No detail bullets yet. Click “Add Bullet” to create one.</p>\n                        ) : (\n                          (editingProduct.features || []).map((feature, index) => (\n                            <div key={`product-feature-${index}`} className="flex items-center gap-2">\n                              <span className="w-7 h-7 rounded-lg bg-[#D4AF37]/10 border border-[#D4AF37]/20 text-[#D4AF37] flex items-center justify-center text-xs font-bold shrink-0">✓</span>\n                              <input\n                                type="text"\n                                value={feature}\n                                placeholder={`Detail bullet ${index + 1}`}\n                                onChange={(e) => {\n                                  const nextFeatures = [...(editingProduct.features || [])];\n                                  nextFeatures[index] = e.target.value;\n                                  setEditingProduct({ ...editingProduct, features: nextFeatures });\n                                }}\n                                className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-800 focus:border-[#D4AF37] rounded-xl text-xs text-white focus:outline-none"\n                              />\n                              <button\n                                type="button"\n                                aria-label={`Remove detail bullet ${index + 1}`}\n                                onClick={() => setEditingProduct({ ...editingProduct, features: (editingProduct.features || []).filter((_, i) => i !== index) })}\n                                className="w-8 h-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 flex items-center justify-center text-sm shrink-0"\n                              >\n                                ×\n                              </button>\n                            </div>\n                          ))\n                        )}\n                      </div>\n                    </div>\n\n''' + anchor
-
-          if anchor not in text:
-              raise SystemExit('Expected Product Category editor anchor was not found; no changes made.')
-
-          path.write_text(text.replace(anchor, insert, 1), encoding='utf-8')
-          print('Product features editor inserted.')
-
-      - name: Repair product save persistence
-        shell: python
-        run: |
-          from pathlib import Path
-
-          path = Path('src/lib/db.ts')
-          text = path.read_text(encoding='utf-8')
-
-          old = '''  saveProducts: (items: ProductItem[]) => {\n    setStored('products', items);\n    syncTableToSupabase('products', items);\n    // Also synchronize product_images table for array-like image storage\n    if (Array.isArray(items)) {\n      items.forEach((prod) => {\n        const imageList = prod.productImages && prod.productImages.length > 0\n          ? prod.productImages\n          : (prod.images && prod.images.length > 0\n              ? prod.images\n              : [prod.image, ...(prod.gallery || [])].filter(Boolean));\n        syncProductImagesToSupabase(prod.id, imageList);\n      });\n    }\n  },'''
-
-          new = '''  saveProducts: (items: ProductItem[]) => {\n    setStored('products', items);\n\n    // Explicitly map ProductItem to the products table. The editor uses `name`,\n    // while the database also requires the legacy `title` column.\n    if (supabase && Array.isArray(items)) {\n      const productRows = items.map((prod: ProductItem) => ({\n        id: prod.id,\n        title: prod.name || '',\n        name: prod.name || '',\n        logoText: prod.logoText || '',\n        logoUrl: prod.logoUrl || '',\n        description: prod.description || '',\n        detailed_description: prod.detailedDescription || null,\n        detailedDescription: prod.detailedDescription || null,\n        category: prod.category || '',\n        image: prod.image || null,\n        features: Array.isArray(prod.features) ? prod.features : [],\n        tags: Array.isArray((prod as any).tags) ? (prod as any).tags : [],\n        live_demo_url: prod.liveDemoUrl || null,\n        liveDemoUrl: prod.liveDemoUrl || null,\n        documentation_url: prod.documentationUrl || null,\n        documentationUrl: prod.documentationUrl || null,\n        status: prod.status || 'Active',\n        featured: prod.featured ?? false,\n        display_order: prod.displayOrder ?? 0,\n        displayOrder: prod.displayOrder ?? 0,\n        gallery: Array.isArray(prod.gallery) ? prod.gallery : [],\n        images: Array.isArray(prod.images) ? prod.images : [],\n        productImages: Array.isArray(prod.productImages) ? prod.productImages : [],\n        updated_at: new Date().toISOString()\n      }));\n\n      void supabase.from('products').upsert(productRows, { onConflict: 'id' }).then(({ error }) => {\n        if (error) console.error('[Products] Supabase save failed:', error);\n      });\n    } else {\n      syncTableToSupabase('products', items);\n    }\n\n    // Always use freshly edited images before stale relational productImages.\n    if (Array.isArray(items)) {\n      items.forEach((prod) => {\n        const imageList = prod.images && prod.images.length > 0\n          ? prod.images\n          : (prod.gallery && prod.gallery.length > 0\n              ? [prod.image, ...(prod.gallery || [])].filter(Boolean)\n              : (prod.productImages && prod.productImages.length > 0\n                  ? prod.productImages\n                  : [prod.image].filter(Boolean)));\n        void syncProductImagesToSupabase(prod.id, imageList);\n      });\n    }\n  },'''
-
-          if old not in text:
-              raise SystemExit('Expected saveProducts block not found; no DB changes made.')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          print('saveProducts persistence repaired.')
-
-      - name: Commit patch
+      - name: Roll back the bad product save patch once
         shell: bash
         run: |
-          if git diff --quiet -- src/components/AdminPanel.tsx src/lib/db.ts; then
-            echo 'No changes to commit.'
-            exit 0
+          if grep -q "Explicitly map ProductItem to the products table" src/lib/db.ts; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git revert --no-edit 6486bb4da114db1bfba22b72f1eea6d3dc5c442f
+            git push
+          else
+            echo 'Bad product save patch is already rolled back. No action needed.'
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/components/AdminPanel.tsx src/lib/db.ts
-          git commit -m 'fix: persist hospital and Yushay product saves'
-          git push
