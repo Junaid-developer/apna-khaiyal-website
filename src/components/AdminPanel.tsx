@@ -3705,26 +3705,43 @@ export default function AdminPanel({
                   <form onSubmit={(e) => {
                     e.preventDefault();
                     const primaryImg = editingProduct.image || (editingProduct.images && editingProduct.images[0]) || '';
-                    const allImgs = editingProduct.images && editingProduct.images.length > 0
-                      ? editingProduct.images
-                      : (primaryImg ? [primaryImg, ...(editingProduct.gallery || [])] : (editingProduct.gallery || []));
-                    const galleryImgs = Array.isArray(editingProduct.gallery) && editingProduct.gallery.length > 0
-                      ? editingProduct.gallery
-                      : (allImgs.length > 1 ? allImgs.slice(1) : []);
+
+                    const allImgs = Array.from(new Set(
+
+                      (editingProduct.images && editingProduct.images.length > 0
+
+                        ? editingProduct.images
+
+                        : [primaryImg, ...(editingProduct.gallery || [])])
+
+                        .filter(Boolean)
+
+                    ));
+
+                    const galleryImgs = allImgs.filter((url) => url !== primaryImg || url === allImgs[0]);
 
                     const updatedProd: ProductItem = {
+
                       ...editingProduct,
-                      image: primaryImg,
-                      gallery: galleryImgs,
-                      images: allImgs
+
+                      image: primaryImg || allImgs[0] || '',
+
+                      images: allImgs,
+
+                      gallery: allImgs.filter((url) => url !== (primaryImg || allImgs[0] || '')),
+
                     };
 
-                    if (isNewProduct) {
-                      saveProducts([...products, updatedProd]);
-                    } else {
-                      saveProducts(products.map(p => p.id === updatedProd.id ? updatedProd : p));
-                    }
-                    showToast('Product settings and images saved successfully!', 'success');
+                    const updatedProducts = isNewProduct
+
+                      ? [...products, updatedProd]
+
+                      : products.map((p) => p.id === updatedProd.id ? updatedProd : p);
+
+                    saveProducts(updatedProducts);
+
+                    showToast('Product saved successfully.', 'success');
+
                     setEditingProduct(null);
                   }} className="space-y-5">
                     <div className="flex items-center justify-between border-b border-neutral-900 pb-3">
