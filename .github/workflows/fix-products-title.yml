@@ -1,0 +1,40 @@
+name: Fix product save title mapping
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add required products title mapping
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          marker = "        const mapped: any = { ...item };\n"
+          patch = """        const mapped: any = { ...item };\n        // public.products requires a NOT NULL title, while the frontend ProductItem uses name.\n        if (tableName === 'products' && !mapped.title) {\n          mapped.title = item.name || item.title || item.id || '';\n        }\n"""
+          if "tableName === 'products' && !mapped.title" in s:
+              print('Product title mapping already present; nothing to do.')
+          elif marker in s:
+              p.write_text(s.replace(marker, patch, 1))
+              print('Inserted product title mapping.')
+          else:
+              raise SystemExit('Safe patch marker not found; refusing to modify db.ts')
+          PY
+
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+users.noreply.github.com'
+          git add src/lib/db.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: map product name to required title'
+          git push
