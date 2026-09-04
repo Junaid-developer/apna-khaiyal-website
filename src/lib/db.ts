@@ -1061,6 +1061,10 @@ const syncTableToSupabase = async (tableName: string, data: any) => {
       // Automatic snake_case fallback mapping in case tables have standard snake_case column names
       const fallbackData = formattedData.map((item: any) => {
         const mapped: any = { ...item };
+        // public.products requires a NOT NULL title, while the frontend ProductItem uses name.
+        if (tableName === 'products' && !mapped.title) {
+          mapped.title = item.name || item.title || item.id || '';
+        }
         if ('photoUrl' in item) {
           mapped.photo_url = item.photoUrl;
           mapped.profile_image = item.photoUrl;
