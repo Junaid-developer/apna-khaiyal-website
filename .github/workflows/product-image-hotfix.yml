@@ -14,29 +14,79 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fix stale product image priority
+      - name: Repair product save and image persistence
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
           p = Path('src/lib/db.ts')
           s = p.read_text()
-          old = """        const imageList = prod.productImages && prod.productImages.length > 0
-          ? prod.productImages
-          : (prod.images && prod.images.length > 0
-              ? prod.images
-              : [prod.image, ...(prod.gallery || [])].filter(Boolean));"""
-          new = """        // Prefer the freshly edited image array; productImages may be stale.
-          const imageList = prod.images && prod.images.length > 0
-            ? prod.images
-            : (prod.gallery && prod.gallery.length > 0
-                ? [prod.image, ...(prod.gallery || [])].filter(Boolean)
-                : (prod.productImages && prod.productImages.length > 0
-                    ? prod.productImages
-                    : [prod.image].filter(Boolean)));"""
-          if old not in s:
-              raise SystemExit('Target block not found; no changes made')
-          p.write_text(s.replace(old, new, 1))
+
+          pattern = re.compile(r"  saveProducts: \(items: ProductItem\[\]\) => \{.*?\n  \},\n\n  getServices:", re.S)
+          match = pattern.search(s)
+          if not match:
+              raise SystemExit('saveProducts block not found; refusing unsafe patch')
+
+          new = '''  saveProducts: (items: ProductItem[]) => {
+    setStored('products', items);
+
+    // Persist the complete product object to Supabase. The editor uses `name`,
+    // while the products table also requires `title`.
+    if (supabase && Array.isArray(items)) {
+      const productRows = items.map((prod: ProductItem) => ({
+        id: prod.id,
+        title: prod.name || '',
+        name: prod.name || '',
+        logoText: prod.logoText || '',
+        logoUrl: prod.logoUrl || '',
+        description: prod.description || '',
+        detailed_description: prod.detailedDescription || null,
+        detailedDescription: prod.detailedDescription || null,
+        category: prod.category || '',
+        image: prod.image || null,
+        features: Array.isArray(prod.features) ? prod.features : [],
+        tags: Array.isArray((prod as any).tags) ? (prod as any).tags : [],
+        live_demo_url: prod.liveDemoUrl || null,
+        liveDemoUrl: prod.liveDemoUrl || null,
+        documentation_url: prod.documentationUrl || null,
+        documentationUrl: prod.documentationUrl || null,
+        status: prod.status || 'Active',
+        featured: prod.featured ?? false,
+        display_order: prod.displayOrder ?? 0,
+        displayOrder: prod.displayOrder ?? 0,
+        gallery: Array.isArray(prod.gallery) ? prod.gallery : [],
+        images: Array.isArray(prod.images) ? prod.images : [],
+        productImages: Array.isArray(prod.productImages) ? prod.productImages : [],
+        updated_at: new Date().toISOString()
+      }));
+
+      void supabase.from('products').upsert(productRows, { onConflict: 'id' }).then(({ error }) => {
+        if (error) console.error('[Products] Supabase save failed:', error);
+      });
+    } else {
+      syncTableToSupabase('products', items);
+    }
+
+    // Keep the relational image table synchronized with every image source.
+    if (Array.isArray(items)) {
+      items.forEach((prod) => {
+        const imageList = Array.from(new Set([
+          ...(Array.isArray(prod.productImages) ? prod.productImages : []),
+          ...(Array.isArray(prod.images) ? prod.images : []),
+          ...(Array.isArray(prod.gallery) ? prod.gallery : []),
+          ...(prod.image ? [prod.image] : [])
+        ].filter(Boolean)));
+        void syncProductImagesToSupabase(prod.id, imageList);
+      });
+    }
+  },
+
+  getServices:'''
+
+          p.write_text(s[:match.start()] + new + s[match.end():])
+          print('Product save handler repaired successfully.')
           PY
 
       - name: Commit source fix
@@ -44,5 +94,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/lib/db.ts
-          git commit -m 'fix: persist all edited product images'
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: persist product edits and all product images'
           git push
