@@ -18,9 +18,11 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
+
           p = Path('src/lib/db.ts')
           s = p.read_text()
-          pattern = r"  saveProducts: \(items: ProductItem\[\]\) => \{.*?\n  \},\n\n  getServices:"
+          pattern = re.compile(r"  saveProducts: \(items: ProductItem\[\]\) => \{.*?\n  \},\n\n  getServices:", re.S)
+
           new = '''  saveProducts: (items: ProductItem[]) => {
     setStored('products', items);
 
@@ -61,29 +63,31 @@ jobs:
 
     if (Array.isArray(items)) {
       items.forEach((prod) => {
-        const imageList = prod.images && prod.images.length > 0
-          ? prod.images
-          : (prod.gallery && prod.gallery.length > 0
-              ? [prod.image, ...(prod.gallery || [])].filter(Boolean)
-              : (prod.productImages && prod.productImages.length > 0
-                  ? prod.productImages
-                  : [prod.image].filter(Boolean)));
+        const imageList = Array.from(new Set([
+          ...(Array.isArray(prod.productImages) ? prod.productImages : []),
+          ...(Array.isArray(prod.images) ? prod.images : []),
+          ...(Array.isArray(prod.gallery) ? prod.gallery : []),
+          ...(prod.image ? [prod.image] : [])
+        ].filter(Boolean)));
         void syncProductImagesToSupabase(prod.id, imageList);
       });
     }
   },
 
   getServices:'''
-          if not re.search(pattern, s, flags=re.S):
+
+          m = pattern.search(s)
+          if not m:
               raise SystemExit('saveProducts block not found; refusing unsafe patch')
-          p.write_text(re.sub(pattern, new, s, count=1, flags=re.S))
+          p.write_text(s[:m.start()] + new + s[m.end():])
+          print('Product save handler patched successfully.')
           PY
 
-      - name: Commit patch
+      - name: Commit source fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/db.ts
           git diff --cached --quiet && exit 0
-          git commit -m "fix: persist all product images and product saves"
+          git commit -m "fix: persist product edits and all product images"
           git push
