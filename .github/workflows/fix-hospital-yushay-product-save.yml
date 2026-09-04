@@ -13,17 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Repair product save handler
+      - name: Repair product save handler and DB mapping
         run: |
           python - <<'PY'
           from pathlib import Path
           import re
+
+          # AdminPanel: keep the editor's current product/images as the source of truth.
           p = Path('src/components/AdminPanel.tsx')
           s = p.read_text()
-
-          # Make the product save operation explicit and resilient: always use the
-          # current editor state, preserve every image, and close the editor only
-          # after the parent save callback has been invoked.
           pattern = re.compile(
               r"(?P<indent>\s*)const primaryImg = editingProduct\.image.*?"
               r"(?P<tail>\s*setEditingProduct\(null\);)",
@@ -31,19 +29,95 @@ jobs:
           )
           m = pattern.search(s)
           if not m:
-              raise SystemExit('Product save block not found; refusing unsafe patch')
-
+              raise SystemExit('AdminPanel product save block not found; refusing unsafe patch')
           indent = m.group('indent')
-          replacement = f'''{indent}const primaryImg = editingProduct.image || (editingProduct.images && editingProduct.images[0]) || '';\n{indent}const allImgs = Array.from(new Set(\n{indent}  (editingProduct.images && editingProduct.images.length > 0\n{indent}    ? editingProduct.images\n{indent}    : [primaryImg, ...(editingProduct.gallery || [])])\n{indent}    .filter(Boolean)\n{indent}));\n{indent}const galleryImgs = allImgs.filter((url) => url !== primaryImg || url === allImgs[0]);\n{indent}const updatedProd: ProductItem = {{\n{indent}  ...editingProduct,\n{indent}  image: primaryImg || allImgs[0] || '',\n{indent}  images: allImgs,\n{indent}  gallery: allImgs.filter((url) => url !== (primaryImg || allImgs[0] || '')),\n{indent}}};\n{indent}const updatedProducts = isNewProduct\n{indent}  ? [...products, updatedProd]\n{indent}  : products.map((p) => p.id === updatedProd.id ? updatedProd : p);\n{indent}saveProducts(updatedProducts);\n{indent}showToast('Product saved successfully.', 'success');\n{indent}setEditingProduct(null);'''
-
+          replacement = f'''{indent}const primaryImg = editingProduct.image || (editingProduct.images && editingProduct.images[0]) || '';\n{indent}const allImgs = Array.from(new Set(\n{indent}  (editingProduct.images && editingProduct.images.length > 0\n{indent}    ? editingProduct.images\n{indent}    : [primaryImg, ...(editingProduct.gallery || [])])\n{indent}    .filter(Boolean)\n{indent}));\n{indent}const updatedProd: ProductItem = {{\n{indent}  ...editingProduct,\n{indent}  image: primaryImg || allImgs[0] || '',\n{indent}  images: allImgs,\n{indent}  gallery: allImgs.filter((url) => url !== (primaryImg || allImgs[0] || '')),\n{indent}}};\n{indent}const updatedProducts = isNewProduct\n{indent}  ? [...products, updatedProd]\n{indent}  : products.map((p) => p.id === updatedProd.id ? updatedProd : p);\n{indent}saveProducts(updatedProducts);\n{indent}showToast('Product saved successfully.', 'success');\n{indent}setEditingProduct(null);'''
           s = s[:m.start()] + replacement + s[m.end():]
           p.write_text(s)
+
+          # db.ts: map ProductItem fields to the actual products schema and prefer
+          # freshly edited images over stale relational productImages.
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          old = '''  saveProducts: (items: ProductItem[]) => {
+    setStored('products', items);
+    syncTableToSupabase('products', items);
+    // Also synchronize product_images table for array-like image storage
+    if (Array.isArray(items)) {
+      items.forEach((prod) => {
+        const imageList = prod.productImages && prod.productImages.length > 0
+          ? prod.productImages
+          : (prod.images && prod.images.length > 0
+              ? prod.images
+              : [prod.image, ...(prod.gallery || [])].filter(Boolean));
+        syncProductImagesToSupabase(prod.id, imageList);
+      });
+    }
+  },'''
+          new = '''  saveProducts: (items: ProductItem[]) => {
+    setStored('products', items);
+
+    // Products use a mixed legacy schema. Do not send the ProductItem object blindly:
+    // the database requires `title`, while the editor uses `name`. Explicit mapping
+    // makes edits to UUID-backed products (including KHMS and Yushay) persist reliably.
+    if (supabase && Array.isArray(items)) {
+      const productRows = items.map((prod: ProductItem) => ({
+        id: prod.id,
+        title: prod.name || '',
+        name: prod.name || '',
+        logoText: prod.logoText || '',
+        logoUrl: prod.logoUrl || '',
+        description: prod.description || '',
+        detailed_description: prod.detailedDescription || null,
+        detailedDescription: prod.detailedDescription || null,
+        category: prod.category || '',
+        image: prod.image || null,
+        features: Array.isArray(prod.features) ? prod.features : [],
+        tags: Array.isArray((prod as any).tags) ? (prod as any).tags : [],
+        live_demo_url: prod.liveDemoUrl || null,
+        liveDemoUrl: prod.liveDemoUrl || null,
+        documentation_url: prod.documentationUrl || null,
+        documentationUrl: prod.documentationUrl || null,
+        status: prod.status || 'Active',
+        featured: prod.featured ?? false,
+        display_order: prod.displayOrder ?? 0,
+        displayOrder: prod.displayOrder ?? 0,
+        gallery: Array.isArray(prod.gallery) ? prod.gallery : [],
+        images: Array.isArray(prod.images) ? prod.images : [],
+        productImages: Array.isArray(prod.productImages) ? prod.productImages : [],
+        updated_at: new Date().toISOString()
+      }));
+
+      void supabase.from('products').upsert(productRows, { onConflict: 'id' }).then(({ error }) => {
+        if (error) console.error('[Products] Supabase save failed:', error);
+      });
+    } else {
+      syncTableToSupabase('products', items);
+    }
+
+    // Relational image rows must always come from the freshly edited images array.
+    if (Array.isArray(items)) {
+      items.forEach((prod) => {
+        const imageList = prod.images && prod.images.length > 0
+          ? prod.images
+          : (prod.gallery && prod.gallery.length > 0
+              ? [prod.image, ...(prod.gallery || [])].filter(Boolean)
+              : (prod.productImages && prod.productImages.length > 0
+                  ? prod.productImages
+                  : [prod.image].filter(Boolean)));
+        void syncProductImagesToSupabase(prod.id, imageList);
+      });
+    }
+  },'''
+          if old not in s:
+              raise SystemExit('db.ts saveProducts block not found; refusing unsafe patch')
+          p.write_text(s.replace(old, new, 1))
           PY
 
       - name: Commit repair
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/components/AdminPanel.tsx
-          git commit -m "fix: repair product editor save handler" || exit 0
+          git add src/components/AdminPanel.tsx src/lib/db.ts
+          git commit -m "fix: persist hospital and Yushay product saves" || exit 0
           git push
