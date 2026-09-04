@@ -1,5 +1,6 @@
   import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { 
   Code, 
   Award, 
@@ -1385,6 +1386,7 @@ export default function App() {
         onSubmitReview={handleSubmitPublicReview}
       />
 
+      <SpeedInsights />
     </div>
   );
 }
