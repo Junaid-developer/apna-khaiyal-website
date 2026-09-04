@@ -37,15 +37,32 @@ jobs:
           path.write_text(text.replace(anchor, insert, 1), encoding='utf-8')
           print('Product features editor inserted.')
 
+      - name: Repair product save persistence
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/lib/db.ts')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''  saveProducts: (items: ProductItem[]) => {\n    setStored('products', items);\n    syncTableToSupabase('products', items);\n    // Also synchronize product_images table for array-like image storage\n    if (Array.isArray(items)) {\n      items.forEach((prod) => {\n        const imageList = prod.productImages && prod.productImages.length > 0\n          ? prod.productImages\n          : (prod.images && prod.images.length > 0\n              ? prod.images\n              : [prod.image, ...(prod.gallery || [])].filter(Boolean));\n        syncProductImagesToSupabase(prod.id, imageList);\n      });\n    }\n  },'''
+
+          new = '''  saveProducts: (items: ProductItem[]) => {\n    setStored('products', items);\n\n    // Explicitly map ProductItem to the products table. The editor uses `name`,\n    // while the database also requires the legacy `title` column.\n    if (supabase && Array.isArray(items)) {\n      const productRows = items.map((prod: ProductItem) => ({\n        id: prod.id,\n        title: prod.name || '',\n        name: prod.name || '',\n        logoText: prod.logoText || '',\n        logoUrl: prod.logoUrl || '',\n        description: prod.description || '',\n        detailed_description: prod.detailedDescription || null,\n        detailedDescription: prod.detailedDescription || null,\n        category: prod.category || '',\n        image: prod.image || null,\n        features: Array.isArray(prod.features) ? prod.features : [],\n        tags: Array.isArray((prod as any).tags) ? (prod as any).tags : [],\n        live_demo_url: prod.liveDemoUrl || null,\n        liveDemoUrl: prod.liveDemoUrl || null,\n        documentation_url: prod.documentationUrl || null,\n        documentationUrl: prod.documentationUrl || null,\n        status: prod.status || 'Active',\n        featured: prod.featured ?? false,\n        display_order: prod.displayOrder ?? 0,\n        displayOrder: prod.displayOrder ?? 0,\n        gallery: Array.isArray(prod.gallery) ? prod.gallery : [],\n        images: Array.isArray(prod.images) ? prod.images : [],\n        productImages: Array.isArray(prod.productImages) ? prod.productImages : [],\n        updated_at: new Date().toISOString()\n      }));\n\n      void supabase.from('products').upsert(productRows, { onConflict: 'id' }).then(({ error }) => {\n        if (error) console.error('[Products] Supabase save failed:', error);\n      });\n    } else {\n      syncTableToSupabase('products', items);\n    }\n\n    // Always use freshly edited images before stale relational productImages.\n    if (Array.isArray(items)) {\n      items.forEach((prod) => {\n        const imageList = prod.images && prod.images.length > 0\n          ? prod.images\n          : (prod.gallery && prod.gallery.length > 0\n              ? [prod.image, ...(prod.gallery || [])].filter(Boolean)\n              : (prod.productImages && prod.productImages.length > 0\n                  ? prod.productImages\n                  : [prod.image].filter(Boolean)));\n        void syncProductImagesToSupabase(prod.id, imageList);\n      });\n    }\n  },'''
+
+          if old not in text:
+              raise SystemExit('Expected saveProducts block not found; no DB changes made.')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          print('saveProducts persistence repaired.')
+
       - name: Commit patch
         shell: bash
         run: |
-          if git diff --quiet -- src/components/AdminPanel.tsx; then
-            echo 'No AdminPanel changes to commit.'
+          if git diff --quiet -- src/components/AdminPanel.tsx src/lib/db.ts; then
+            echo 'No changes to commit.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/components/AdminPanel.tsx
-          git commit -m 'Make product detail feature text editable in admin panel'
+          git add src/components/AdminPanel.tsx src/lib/db.ts
+          git commit -m 'fix: persist hospital and Yushay product saves'
           git push
