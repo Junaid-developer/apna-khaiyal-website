@@ -4,15 +4,6 @@ import { ProductItem } from '../types';
 
 interface ProductsViewProps { products: ProductItem[]; isLoading?: boolean; onBookDemo?: (productName: string) => void; }
 
-// Demo screenshots are used only when a product currently has fewer than 3 images.
-// Real images from Admin Panel / Supabase always stay first and are never replaced.
-const DEMO_PRODUCT_IMAGES = [
-  'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=85',
-  'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=85',
-  'https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1200&q=85',
-  'https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=1200&q=85'
-];
-
 const getProductImages = (product: ProductItem) => {
   const relationalImages = (product.productImages || [])
     .slice()
@@ -20,21 +11,12 @@ const getProductImages = (product: ProductItem) => {
     .map(item => item.imageUrl)
     .filter(Boolean);
 
-  const realImages = Array.from(new Set([
+  return Array.from(new Set([
     ...(product.image?.trim() ? [product.image.trim()] : []),
     ...(product.gallery || []).filter(Boolean),
     ...(product.images || []).filter(Boolean),
     ...relationalImages
   ]));
-
-  // Add demo images so every card visibly demonstrates the carousel.
-  // Once real gallery images are added in Admin Panel, those real images are used instead.
-  if (realImages.length >= 3) return realImages;
-
-  return Array.from(new Set([
-    ...realImages,
-    ...DEMO_PRODUCT_IMAGES
-  ])).slice(0, 4);
 };
 
 function ProductImageSlider({ product }: { product: ProductItem }) {
@@ -84,32 +66,16 @@ function ProductImageSlider({ product }: { product: ProductItem }) {
 
           {images.length > 1 && (
             <>
-              <button
-                type="button"
-                aria-label={`Previous image for ${product.name}`}
-                onClick={goToPrevious}
-                className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#12343b]/85 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#12343b]"
-              >
+              <button type="button" aria-label={`Previous image for ${product.name}`} onClick={goToPrevious} className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#12343b]/85 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#12343b]">
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <button
-                type="button"
-                aria-label={`Next image for ${product.name}`}
-                onClick={goToNext}
-                className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#12343b]/85 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#12343b]"
-              >
+              <button type="button" aria-label={`Next image for ${product.name}`} onClick={goToNext} className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#12343b]/85 border border-white/20 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#12343b]">
                 <ChevronRight className="w-4 h-4" />
               </button>
 
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
                 {images.map((_, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    aria-label={`Show image ${index + 1} of ${product.name}`}
-                    onClick={e => { e.stopPropagation(); setActiveIndex(index); }}
-                    className={`h-1.5 rounded-full transition-all ${index === activeIndex ? 'w-5 bg-[#e1b382]' : 'w-1.5 bg-white/60'}`}
-                  />
+                  <button key={index} type="button" aria-label={`Show image ${index + 1} of ${product.name}`} onClick={e => { e.stopPropagation(); setActiveIndex(index); }} className={`h-1.5 rounded-full transition-all ${index === activeIndex ? 'w-5 bg-[#e1b382]' : 'w-1.5 bg-white/60'}`} />
                 ))}
               </div>
             </>
@@ -140,9 +106,6 @@ export default function ProductsView({ products, onBookDemo }: ProductsViewProps
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeProductModal, setActiveProductModal] = useState<ProductItem | null>(null);
   const categories = ['All', ...Array.from(new Set(products.map(p => p.category).filter(Boolean)))];
-  // Keep the exact Admin Panel displayOrder on every load. Supabase does not guarantee
-  // row order unless an explicit order is requested, so sort a fresh copy here without
-  // mutating the original products state.
   const orderedProducts = [...products].sort((a, b) => {
     const orderA = Number.isFinite(Number(a.displayOrder)) ? Number(a.displayOrder) : Number.MAX_SAFE_INTEGER;
     const orderB = Number.isFinite(Number(b.displayOrder)) ? Number(b.displayOrder) : Number.MAX_SAFE_INTEGER;
