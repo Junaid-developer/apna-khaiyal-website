@@ -1,0 +1,49 @@
+name: Fix hospital and Yushay product save
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Repair product save handler
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('src/components/AdminPanel.tsx')
+          s = p.read_text()
+
+          # Make the product save operation explicit and resilient: always use the
+          # current editor state, preserve every image, and close the editor only
+          # after the parent save callback has been invoked.
+          pattern = re.compile(
+              r"(?P<indent>\s*)const primaryImg = editingProduct\.image.*?"
+              r"(?P<tail>\s*setEditingProduct\(null\);)",
+              re.S,
+          )
+          m = pattern.search(s)
+          if not m:
+              raise SystemExit('Product save block not found; refusing unsafe patch')
+
+          indent = m.group('indent')
+          replacement = f'''{indent}const primaryImg = editingProduct.image || (editingProduct.images && editingProduct.images[0]) || '';\n{indent}const allImgs = Array.from(new Set(\n{indent}  (editingProduct.images && editingProduct.images.length > 0\n{indent}    ? editingProduct.images\n{indent}    : [primaryImg, ...(editingProduct.gallery || [])])\n{indent}    .filter(Boolean)\n{indent}));\n{indent}const galleryImgs = allImgs.filter((url) => url !== primaryImg || url === allImgs[0]);\n{indent}const updatedProd: ProductItem = {{\n{indent}  ...editingProduct,\n{indent}  image: primaryImg || allImgs[0] || '',\n{indent}  images: allImgs,\n{indent}  gallery: allImgs.filter((url) => url !== (primaryImg || allImgs[0] || '')),\n{indent}}};\n{indent}const updatedProducts = isNewProduct\n{indent}  ? [...products, updatedProd]\n{indent}  : products.map((p) => p.id === updatedProd.id ? updatedProd : p);\n{indent}saveProducts(updatedProducts);\n{indent}showToast('Product saved successfully.', 'success');\n{indent}setEditingProduct(null);'''
+
+          s = s[:m.start()] + replacement + s[m.end():]
+          p.write_text(s)
+          PY
+
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/AdminPanel.tsx
+          git commit -m "fix: repair product editor save handler" || exit 0
+          git push
