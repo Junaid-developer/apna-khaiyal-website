@@ -1862,55 +1862,16 @@ export const dbStore = {
   getProducts: (): ProductItem[] => getStored('products', DEFAULT_PRODUCTS).sort((a, b) => a.displayOrder - b.displayOrder),
   saveProducts: (items: ProductItem[]) => {
     setStored('products', items);
-
-    // Explicitly map ProductItem to the products table. The editor uses `name`,
-    // while the database also requires the legacy `title` column.
-    if (supabase && Array.isArray(items)) {
-      const productRows = items.map((prod: ProductItem) => ({
-        id: prod.id,
-        title: prod.name || '',
-        name: prod.name || '',
-        logoText: prod.logoText || '',
-        logoUrl: prod.logoUrl || '',
-        description: prod.description || '',
-        detailed_description: prod.detailedDescription || null,
-        detailedDescription: prod.detailedDescription || null,
-        category: prod.category || '',
-        image: prod.image || null,
-        features: Array.isArray(prod.features) ? prod.features : [],
-        tags: Array.isArray((prod as any).tags) ? (prod as any).tags : [],
-        live_demo_url: prod.liveDemoUrl || null,
-        liveDemoUrl: prod.liveDemoUrl || null,
-        documentation_url: prod.documentationUrl || null,
-        documentationUrl: prod.documentationUrl || null,
-        status: prod.status || 'Active',
-        featured: prod.featured ?? false,
-        display_order: prod.displayOrder ?? 0,
-        displayOrder: prod.displayOrder ?? 0,
-        gallery: Array.isArray(prod.gallery) ? prod.gallery : [],
-        images: Array.isArray(prod.images) ? prod.images : [],
-        productImages: Array.isArray(prod.productImages) ? prod.productImages : [],
-        updated_at: new Date().toISOString()
-      }));
-
-      void supabase.from('products').upsert(productRows, { onConflict: 'id' }).then(({ error }) => {
-        if (error) console.error('[Products] Supabase save failed:', error);
-      });
-    } else {
-      syncTableToSupabase('products', items);
-    }
-
-    // Always use freshly edited images before stale relational productImages.
+    syncTableToSupabase('products', items);
+    // Also synchronize product_images table for array-like image storage
     if (Array.isArray(items)) {
       items.forEach((prod) => {
-        const imageList = prod.images && prod.images.length > 0
-          ? prod.images
-          : (prod.gallery && prod.gallery.length > 0
-              ? [prod.image, ...(prod.gallery || [])].filter(Boolean)
-              : (prod.productImages && prod.productImages.length > 0
-                  ? prod.productImages
-                  : [prod.image].filter(Boolean)));
-        void syncProductImagesToSupabase(prod.id, imageList);
+        const imageList = prod.productImages && prod.productImages.length > 0
+          ? prod.productImages
+          : (prod.images && prod.images.length > 0
+              ? prod.images
+              : [prod.image, ...(prod.gallery || [])].filter(Boolean));
+        syncProductImagesToSupabase(prod.id, imageList);
       });
     }
   },
