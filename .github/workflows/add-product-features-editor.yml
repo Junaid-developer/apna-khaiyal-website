@@ -1,15 +1,94 @@
-name: Rollback Product Save Patch
+name: Product Persistence Repair
 
 on:
   push:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  rollback-bad-save-patch:
+  repair:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Disabled legacy rollback
-        run: echo 'Legacy product-save rollback disabled; keep the current product persistence fix.'
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Repair product save persistence
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+
+          pattern = re.compile(r"  saveProducts: \(items: ProductItem\[\]\) => \{.*?\n  \},\n\n  getServices:", re.S)
+          m = pattern.search(s)
+          if not m:
+              raise SystemExit('saveProducts block not found')
+
+          new = '''  saveProducts: (items: ProductItem[]) => {
+    setStored('products', items);
+
+    // Save products using only columns supported by the products table.
+    if (supabase && Array.isArray(items)) {
+      const rows = items.map((prod: ProductItem) => ({
+        id: prod.id,
+        title: prod.name || '',
+        name: prod.name || '',
+        logo_text: prod.logoText || '',
+        logo_url: prod.logoUrl || '',
+        description: prod.description || '',
+        detailed_description: prod.detailedDescription || null,
+        category: prod.category || '',
+        image: prod.image || null,
+        features: Array.isArray(prod.features) ? prod.features : [],
+        tags: Array.isArray((prod as any).tags) ? (prod as any).tags : [],
+        live_demo_url: prod.liveDemoUrl || null,
+        documentation_url: prod.documentationUrl || null,
+        status: prod.status || 'Active',
+        featured: prod.featured ?? false,
+        display_order: prod.displayOrder ?? 0,
+        gallery: Array.isArray(prod.gallery) ? prod.gallery : [],
+        images: Array.isArray(prod.images) ? prod.images : [],
+        productImages: Array.isArray(prod.productImages) ? prod.productImages : [],
+        updated_at: new Date().toISOString()
+      }));
+
+      void supabase.from('products').upsert(rows, { onConflict: 'id' }).then(({ error }) => {
+        if (error) console.error('[Products] save failed:', error);
+      });
+    }
+
+    // Persist every image to the relational image table as well.
+    if (Array.isArray(items)) {
+      items.forEach((prod) => {
+        const imageList = Array.from(new Set([
+          ...(Array.isArray(prod.productImages) ? prod.productImages : []),
+          ...(Array.isArray(prod.images) ? prod.images : []),
+          ...(Array.isArray(prod.gallery) ? prod.gallery : []),
+          ...(prod.image ? [prod.image] : [])
+        ].filter(Boolean)));
+        void syncProductImagesToSupabase(prod.id, imageList);
+      });
+    }
+  },
+
+  getServices:'''
+
+          p.write_text(s[:m.start()] + new + s[m.end():])
+          print('Product persistence repair applied.')
+          PY
+
+      - name: Commit repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'fix: persist product edits and images correctly'
+          git push
