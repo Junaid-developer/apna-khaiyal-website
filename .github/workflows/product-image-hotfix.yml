@@ -1,0 +1,48 @@
+name: Product image persistence hotfix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fix stale product image priority
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          old = """        const imageList = prod.productImages && prod.productImages.length > 0
+          ? prod.productImages
+          : (prod.images && prod.images.length > 0
+              ? prod.images
+              : [prod.image, ...(prod.gallery || [])].filter(Boolean));"""
+          new = """        // Prefer the freshly edited image array; productImages may be stale.
+          const imageList = prod.images && prod.images.length > 0
+            ? prod.images
+            : (prod.gallery && prod.gallery.length > 0
+                ? [prod.image, ...(prod.gallery || [])].filter(Boolean)
+                : (prod.productImages && prod.productImages.length > 0
+                    ? prod.productImages
+                    : [prod.image].filter(Boolean)));"""
+          if old not in s:
+              raise SystemExit('Target block not found; no changes made')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Commit source fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          git commit -m 'fix: persist all edited product images'
+          git push
