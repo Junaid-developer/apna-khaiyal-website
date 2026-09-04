@@ -1,0 +1,70 @@
+name: Clear non-ATEE product images
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/workflows/clear-non-atee-product-images.yml'
+
+jobs:
+  clear-images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove non-ATEE product images from defaults
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+
+          start = s.index('const DEFAULT_PRODUCTS: ProductItem[] = [')
+          end = s.index('const DEFAULT_TEAM:', start)
+          block = s[start:end]
+
+          # Remove default image/gallery URLs from every default product except ATEE.
+          parts = block.split('  {', 1)
+          prefix = parts[0]
+          products = '  {' + parts[1]
+          chunks = products.split('  {')
+          rebuilt = [chunks[0]]
+          for chunk in chunks[1:]:
+              if 'name: "ATEE Enterprise Excellence"' in chunk:
+                  rebuilt.append('  {' + chunk)
+                  continue
+              chunk = re.sub(r'    gallery: \[[\s\S]*?\],\n    category:', '    gallery: [],\n    category:', chunk, count=1)
+              chunk = re.sub(r'    image: "https://[^\"]+"', '    image: ""', chunk, count=1)
+              rebuilt.append('  {' + chunk)
+          new_block = prefix + ''.join(rebuilt)
+          s = s[:start] + new_block + s[end:]
+
+          # Sanitize cached/local product data too, so old browser localStorage cannot restore dummy images.
+          old = "  getProducts: (): ProductItem[] => getStored('products', DEFAULT_PRODUCTS).sort((a, b) => a.displayOrder - b.displayOrder),"
+          new = """  getProducts: (): ProductItem[] => {
+    const stored = getStored('products', DEFAULT_PRODUCTS);
+    const sanitized = stored.map((item) => {
+      if (item.name === 'ATEE Enterprise Excellence') return item;
+      return { ...item, image: '', gallery: [], images: [], productImages: [] };
+    });
+    setStored('products', sanitized);
+    return sanitized.sort((a, b) => a.displayOrder - b.displayOrder);
+  },"""
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif "getProducts: (): ProductItem[] => {" not in s:
+              raise SystemExit('getProducts target not found; refusing unsafe patch')
+
+          p.write_text(s)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'Clear dummy product images except ATEE'
+          git push
