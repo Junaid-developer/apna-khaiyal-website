@@ -1,3 +1,4 @@
+# Product image persistence trigger
 name: Product image persistence hotfix
 
 on:
