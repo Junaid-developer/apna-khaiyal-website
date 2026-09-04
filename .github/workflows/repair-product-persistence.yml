@@ -1,0 +1,89 @@
+name: Repair product persistence
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch product save handler
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          pattern = r"  saveProducts: \(items: ProductItem\[\]\) => \{.*?\n  \},\n\n  getServices:"
+          new = '''  saveProducts: (items: ProductItem[]) => {
+    setStored('products', items);
+
+    if (supabase && Array.isArray(items)) {
+      const productRows = items.map((prod: ProductItem) => ({
+        id: prod.id,
+        title: prod.name || '',
+        name: prod.name || '',
+        logoText: prod.logoText || '',
+        logoUrl: prod.logoUrl || '',
+        description: prod.description || '',
+        detailed_description: prod.detailedDescription || null,
+        detailedDescription: prod.detailedDescription || null,
+        category: prod.category || '',
+        image: prod.image || null,
+        features: Array.isArray(prod.features) ? prod.features : [],
+        tags: Array.isArray((prod as any).tags) ? (prod as any).tags : [],
+        live_demo_url: prod.liveDemoUrl || null,
+        liveDemoUrl: prod.liveDemoUrl || null,
+        documentation_url: prod.documentationUrl || null,
+        documentationUrl: prod.documentationUrl || null,
+        status: prod.status || 'Active',
+        featured: prod.featured ?? false,
+        display_order: prod.displayOrder ?? 0,
+        displayOrder: prod.displayOrder ?? 0,
+        gallery: Array.isArray(prod.gallery) ? prod.gallery : [],
+        images: Array.isArray(prod.images) ? prod.images : [],
+        productImages: Array.isArray(prod.productImages) ? prod.productImages : [],
+        updated_at: new Date().toISOString()
+      }));
+
+      void supabase.from('products').upsert(productRows, { onConflict: 'id' }).then(({ error }) => {
+        if (error) console.error('[Products] Supabase save failed:', error);
+      });
+    } else {
+      syncTableToSupabase('products', items);
+    }
+
+    if (Array.isArray(items)) {
+      items.forEach((prod) => {
+        const imageList = prod.images && prod.images.length > 0
+          ? prod.images
+          : (prod.gallery && prod.gallery.length > 0
+              ? [prod.image, ...(prod.gallery || [])].filter(Boolean)
+              : (prod.productImages && prod.productImages.length > 0
+                  ? prod.productImages
+                  : [prod.image].filter(Boolean)));
+        void syncProductImagesToSupabase(prod.id, imageList);
+      });
+    }
+  },
+
+  getServices:'''
+          if not re.search(pattern, s, flags=re.S):
+              raise SystemExit('saveProducts block not found; refusing unsafe patch')
+          p.write_text(re.sub(pattern, new, s, count=1, flags=re.S))
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: persist all product images and product saves"
+          git push
