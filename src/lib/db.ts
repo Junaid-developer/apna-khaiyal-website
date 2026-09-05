@@ -41,6 +41,12 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
 
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return careers;
 
+  // Use an authenticated SECURITY DEFINER RPC for Careers writes. This makes the
+  // admin save atomic and avoids browser-side RLS/session edge cases.
+  const { error: rpcError } = await legacy.supabase.rpc('save_careers', { p_careers: careers });
+  if (!rpcError) return careers;
+  console.error('[Careers] RPC persistence failed, falling back to direct table writes:', rpcError);
+
   const incomingIds = new Set(careers.map((job: any) => job.id));
   const removedIds = previousCareers
     .map((job: any) => job?.id)

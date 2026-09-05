@@ -436,9 +436,14 @@ export default function App() {
     dbStore.saveReviews(data);
   };
 
-  const handleSaveCareers = (data: CareerOpportunity[]) => {
-    setCareers(data);
-    dbStore.saveCareers(data);
+  const handleSaveCareers = async (data: CareerOpportunity[]) => {
+    try {
+      await dbStore.saveCareers(data);
+      setCareers(data);
+    } catch (error) {
+      console.error('[Careers] Save failed:', error);
+      throw error;
+    }
   };
 
   const handleSaveApplications = (data: JobApplication[]) => {
