@@ -44,18 +44,13 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     const { error } = await legacy.supabase
       .from('site_settings')
       .upsert(payload, { onConflict: 'key' });
-
-    if (error) {
-      console.error('[Careers] Supabase save failed:', error);
-      throw error;
-    }
+    if (error) throw error;
 
     const { data, error: verifyError } = await legacy.supabase
       .from('site_settings')
       .select('value')
       .eq('key', 'careers')
       .maybeSingle();
-
     if (verifyError) throw verifyError;
     if (!data || !Array.isArray((data as any).value)) {
       throw new Error('Careers save verification failed: saved record was not returned.');
@@ -70,22 +65,19 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   }
 };
 
-const isUuid = (value: unknown): value is string =>
-  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-
 const persistApplicationList = async (items: JobApplication[]) => {
   const applications = Array.isArray(items) ? items : [];
   localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(applications));
 
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return applications;
 
-  // public.careers is no longer the source of truth for Careers; it uses a
-  // JSON settings record and therefore its frontend IDs are not necessarily
-  // UUIDs. job_applications.job_id is a UUID foreign key, so only send it when
-  // the selected job actually has a valid UUID. Always preserve job_title.
+  // Careers are stored in site_settings, not public.careers. Therefore the
+  // frontend job id is not a public.careers UUID and must never be sent to the
+  // job_applications.job_id foreign key. Keep the human-readable job_title so
+  // the admin panel still shows exactly which position was applied for.
   const rows = applications.map((item: any) => ({
-    id: isUuid(item.id) ? item.id : crypto.randomUUID(),
-    job_id: isUuid(item.jobId) ? item.jobId : null,
+    id: typeof item.id === 'string' && item.id.trim() ? item.id : crypto.randomUUID(),
+    job_id: null,
     job_title: item.jobTitle || 'General Application',
     applicant_name: item.fullName || item.applicantName || '',
     email: item.email || item.applicantEmail || '',
@@ -112,24 +104,20 @@ const persistApplicationList = async (items: JobApplication[]) => {
 
 const readCareerSettings = async () => {
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return null;
-
   try {
     const { data, error } = await legacy.supabase
       .from('site_settings')
       .select('value')
       .eq('key', 'careers')
       .maybeSingle();
-
     if (error) {
       console.error('[Careers] Supabase load failed:', error);
       return null;
     }
-
     if (data && Array.isArray((data as any).value)) return (data as any).value;
   } catch (error) {
     console.error('[Careers] Careers read failed:', error);
   }
-
   return null;
 };
 
