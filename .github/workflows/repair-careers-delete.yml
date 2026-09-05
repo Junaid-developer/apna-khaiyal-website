@@ -1,0 +1,83 @@
+name: Repair Careers Delete Persistence
+on:
+  push:
+    paths:
+      - '.github/workflows/repair-careers-delete.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/lib/db.ts')
+          s=p.read_text()
+          careers=r'''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
+  saveCareers: async (items: CareerOpportunity[]) => {
+    const careers = Array.isArray(items) ? items : [];
+    setStored('careers', careers);
+    if (!supabase || !isSupabaseConfigured) return careers;
+    try {
+      const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
+      if (existingErr) throw existingErr;
+      const ids = new Set(careers.map((x: any) => x?.id).filter(Boolean));
+      const removed = (existing || []).map((x: any) => x.id).filter((id: string) => !ids.has(id));
+      if (removed.length) {
+        const { error } = await supabase.from('careers').delete().in('id', removed);
+        if (error) throw error;
+      }
+      if (careers.length) {
+        const rows = careers.map((job: any) => ({id: job.id,title: job.title || '',type: job.type || 'job',department: job.department || 'General',location: job.location || '',description: job.description || '',requirements: Array.isArray(job.requirements) ? job.requirements : [],responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : [],experience: job.experience || '',is_active: job.active !== false,active: job.active !== false,isActive: job.active !== false}));
+        const { error } = await supabase.from('careers').upsert(rows, {onConflict:'id'});
+        if (error) throw error;
+      }
+    } catch (e) { console.error('[Careers] authoritative save failed:', e); }
+    return careers;
+  },'''
+          apps=r'''  getApplications: (): JobApplication[] => getStored('applications', []),
+  saveApplications: async (items: JobApplication[]) => {
+    const applications = Array.isArray(items) ? items : [];
+    setStored('applications', applications);
+    if (!supabase || !isSupabaseConfigured) return applications;
+    try {
+      const { data: existing, error: existingErr } = await supabase.from('job_applications').select('id');
+      if (existingErr) throw existingErr;
+      const ids = new Set(applications.map((x: any) => x?.id).filter(Boolean));
+      const removed = (existing || []).map((x: any) => x.id).filter((id: string) => !ids.has(id));
+      if (removed.length) {
+        const { error } = await supabase.from('job_applications').delete().in('id', removed);
+        if (error) throw error;
+      }
+      if (applications.length) await syncTableToSupabase('job_applications', applications);
+    } catch (e) { console.error('[Applications] authoritative save failed:', e); }
+    return applications;
+  },'''
+          s,n=re.subn(r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  \},(?=\n\s*getApplications:)",careers,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('careers block not found')
+          s,n=re.subn(r"  getApplications: \(\): JobApplication\[\] => getStored\('applications', \[\]\),\n  saveApplications: .*?\n  \},(?=\n\s*getMessages:)",apps,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('applications block not found')
+          p.write_text(s)
+          PY
+      - name: Patch refresh handling
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/App.tsx'); s=p.read_text()
+          s=s.replace("       if (normCareers.length > 0) {\n         setCareers(normCareers);\n       }","       setCareers(normCareers);")
+          s=s.replace("          // Never wipe locally loaded applications when Supabase returns an empty/temporary response.\n          if (normApps.length > 0) {\n            setApplications(normApps);\n          }","          setApplications(normApps);")
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts src/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: make career and application deletion authoritative'
+          git push
