@@ -1571,51 +1571,22 @@ export const syncAllFromSupabase = async (userRole: string = 'Admin') => {
       // the website_settings / site_settings mirror (and finally local storage) instead of
       // treating "no rows from this table" as "no careers exist" — this is what was overwriting
       // saved jobs with stale/empty data on refresh.
-      // Careers exist in multiple legacy stores in this project. NEVER let a shorter
-      // website_settings/site_settings snapshot overwrite the complete careers table.
-      // Merge all available sources by ID, preserving the complete union of records.
+      // The dedicated careers table is the single source of truth. Legacy settings mirrors
+      // must never be merged back because that resurrects records after an admin deletion.
+      // Only use a settings mirror when the dedicated table query itself failed.
       try {
-        const sourceLists: any[][] = [];
-        if (Array.isArray(normalizedCareersList)) sourceLists.push(normalizedCareersList);
-
-        const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
-        if (setRow && Array.isArray((setRow as any).value)) sourceLists.push((setRow as any).value);
-
-        const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();
-        if (siteSetRow && Array.isArray((siteSetRow as any).value)) sourceLists.push((siteSetRow as any).value);
-
-        const mergedById = new Map<string, any>();
-        for (const list of sourceLists) {
-          for (const item of list) {
-            if (!item) continue;
-            const id = String(item.id || '');
-            if (!id) continue;
-            const previous = mergedById.get(id);
-            // Keep the first (dedicated careers-table) record authoritative, while
-            // filling any missing fields from the settings mirrors.
-            mergedById.set(id, previous ? { ...item, ...previous } : item);
-          }
-        }
-        normalizedCareersList = Array.from(mergedById.values());
-      } catch (careersFallbackErr) {
-        console.warn('[Supabase Sync] careers multi-source merge notice:', careersFallbackErr);
-      }
-
-      /* legacy fallback retained below only when the authoritative snapshot is unavailable */
-      if (normalizedCareersList.length === 0) {
-        try {
+        if (!careersErr && Array.isArray(rawCareers)) {
+          normalizedCareersList = rawCareers;
+        } else if (careersErr) {
           const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
-          if (setRow && Array.isArray((setRow as any).value) && (setRow as any).value.length > 0) {
-            normalizedCareersList = (setRow as any).value;
-          } else {
+          if (setRow && Array.isArray((setRow as any).value)) normalizedCareersList = (setRow as any).value;
+          if (normalizedCareersList.length === 0) {
             const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();
-            if (siteSetRow && Array.isArray((siteSetRow as any).value) && (siteSetRow as any).value.length > 0) {
-              normalizedCareersList = (siteSetRow as any).value;
-            }
+            if (siteSetRow && Array.isArray((siteSetRow as any).value)) normalizedCareersList = (siteSetRow as any).value;
           }
-        } catch (careersFallbackErr) {
-          console.warn('[Supabase Sync] careers website_settings fallback notice:', careersFallbackErr);
         }
+      } catch (careersFallbackErr) {
+        console.warn('[Supabase Sync] careers fallback notice:', careersFallbackErr);
       }
 
       if (normalizedCareersList.length > 0) {
