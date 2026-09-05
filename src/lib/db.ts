@@ -39,18 +39,14 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   const previousCareers = readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY);
   localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(careers));
 
-  if (!legacy.supabase || !legacy.isSupabaseConfigured) {
-    return careers;
-  }
+  if (!legacy.supabase || !legacy.isSupabaseConfigured) return careers;
 
   const incomingIds = new Set(careers.map((job: any) => job.id));
   const removedIds = previousCareers
     .map((job: any) => job?.id)
     .filter((id): id is string => !!id && !incomingIds.has(id));
 
-  // Use only the canonical columns that exist in the careers table. This avoids
-  // failures caused by older Data API schema caches for legacy duplicate columns.
-  const rows = careers.map((job: any, index: number) => ({
+  const rows = careers.map((job: any) => ({
     id: job.id,
     title: job.title || '',
     type: job.type || 'job',
@@ -58,11 +54,13 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     location: job.location || '',
     description: job.description || '',
     requirements: Array.isArray(job.requirements) ? job.requirements : [],
-    responsibilities: Array.isArray(job.responsibilities)
-      ? job.responsibilities
-      : (Array.isArray(job.benefits) ? job.benefits : []),
+    responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),
     experience: job.experience || '',
     is_active: job.active !== false,
+    active: job.active !== false,
+    benefits: Array.isArray(job.benefits) ? job.benefits : [],
+    displayOrder: Number.isFinite(job.displayOrder) ? job.displayOrder : 0,
+    isActive: job.active !== false,
     updated_at: new Date().toISOString()
   }));
 
@@ -73,10 +71,29 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     }
 
     if (rows.length) {
-      const { error } = await legacy.supabase
+      // Do not use upsert for a brand-new job. Supabase RLS can reject the UPDATE
+      // half of an upsert even when INSERT is allowed. Insert new IDs directly,
+      // and only UPDATE rows that already exist.
+      const { data: existingRows, error: existingError } = await legacy.supabase
         .from('careers')
-        .upsert(rows, { onConflict: 'id' });
-      if (error) throw error;
+        .select('id')
+        .in('id', rows.map((row: any) => row.id));
+      if (existingError) throw existingError;
+
+      const existingIds = new Set((existingRows || []).map((row: any) => row.id));
+      const newRows = rows.filter((row: any) => !existingIds.has(row.id));
+      const existingCareerRows = rows.filter((row: any) => existingIds.has(row.id));
+
+      if (newRows.length) {
+        const { error } = await legacy.supabase.from('careers').insert(newRows);
+        if (error) throw error;
+      }
+
+      for (const row of existingCareerRows) {
+        const { id, ...changes } = row;
+        const { error } = await legacy.supabase.from('careers').update(changes).eq('id', id);
+        if (error) throw error;
+      }
     }
 
     return careers;
@@ -91,9 +108,7 @@ const persistApplicationList = async (items: JobApplication[]) => {
   const previousApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(applications));
 
-  if (!legacy.supabase || !legacy.isSupabaseConfigured) {
-    return applications;
-  }
+  if (!legacy.supabase || !legacy.isSupabaseConfigured) return applications;
 
   const rows = applications.map((item: any) => ({
     id: item.id,
@@ -109,23 +124,17 @@ const persistApplicationList = async (items: JobApplication[]) => {
   })).filter((row: any) => row.id && row.applicant_name && row.email);
 
   const incomingIds = new Set(rows.map((row: any) => row.id));
-  const removedIds = previousApplications
-    .map((item: any) => item?.id)
-    .filter((id): id is string => !!id && !incomingIds.has(id));
+  const removedIds = previousApplications.map((item: any) => item?.id).filter((id): id is string => !!id && !incomingIds.has(id));
 
   try {
     if (removedIds.length) {
       const { error } = await legacy.supabase.from('job_applications').delete().in('id', removedIds);
       if (error) throw error;
     }
-
     if (rows.length) {
-      const { error } = await legacy.supabase
-        .from('job_applications')
-        .upsert(rows, { onConflict: 'id' });
+      const { error } = await legacy.supabase.from('job_applications').upsert(rows, { onConflict: 'id' });
       if (error) throw error;
     }
-
     return applications;
   } catch (error) {
     console.error('[Applications] Supabase persistence failed:', error);
@@ -139,25 +148,13 @@ const wrappedSyncAllFromSupabase = async () => {
 
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     try {
-      const { data: careerRows, error: careerError } = await legacy.supabase
-        .from('careers')
-        .select('*')
-        .order('displayOrder', { ascending: true });
-
+      const { data: careerRows, error: careerError } = await legacy.supabase.from('careers').select('*').order('displayOrder', { ascending: true });
       if (careerError) throw careerError;
-
       data.careers = (careerRows || []).map((item: any) => ({
-        id: item.id || '',
-        title: item.title || '',
-        type: item.type || 'job',
-        department: item.department || 'General',
-        location: item.location || '',
-        description: item.description || '',
-        requirements: Array.isArray(item.requirements) ? item.requirements : [],
-        responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : [],
-        benefits: Array.isArray(item.benefits) ? item.benefits : [],
-        experience: item.experience || '',
-        active: item.active ?? item.is_active ?? item.isActive ?? true,
+        id: item.id || '', title: item.title || '', type: item.type || 'job', department: item.department || 'General',
+        location: item.location || '', description: item.description || '', requirements: Array.isArray(item.requirements) ? item.requirements : [],
+        responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : [], benefits: Array.isArray(item.benefits) ? item.benefits : [],
+        experience: item.experience || '', active: item.active ?? item.is_active ?? item.isActive ?? true,
         displayOrder: item.displayOrder ?? item.display_order ?? 0
       })).filter((item: CareerOpportunity) => item.id);
       localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers));
@@ -166,23 +163,12 @@ const wrappedSyncAllFromSupabase = async () => {
     }
 
     try {
-      const { data: applicationRows, error: applicationError } = await legacy.supabase
-        .from('job_applications')
-        .select('*')
-        .order('created_at', { ascending: false });
-
+      const { data: applicationRows, error: applicationError } = await legacy.supabase.from('job_applications').select('*').order('created_at', { ascending: false });
       if (applicationError) throw applicationError;
-
       data.applications = (applicationRows || []).map((item: any) => ({
-        id: item.id || '',
-        jobId: item.job_id || item.jobId || '',
-        jobTitle: item.job_title || item.jobTitle || 'General Application',
-        fullName: item.applicant_name || item.fullName || '',
-        email: item.email || '',
-        phone: item.phone || '',
-        coverLetter: item.cover_note || item.coverLetter || '',
-        resumeUrl: item.resume_url || item.resumeUrl || '',
-        status: item.status || 'New',
+        id: item.id || '', jobId: item.job_id || item.jobId || '', jobTitle: item.job_title || item.jobTitle || 'General Application',
+        fullName: item.applicant_name || item.fullName || '', email: item.email || '', phone: item.phone || '',
+        coverLetter: item.cover_note || item.coverLetter || '', resumeUrl: item.resume_url || item.resumeUrl || '', status: item.status || 'New',
         appliedAt: item.created_at || item.appliedAt || ''
       })).filter((item: JobApplication) => item.id);
       localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
@@ -190,7 +176,6 @@ const wrappedSyncAllFromSupabase = async () => {
       console.error('[Applications] Direct Supabase sync failed:', error);
     }
   }
-
   return data;
 };
 
