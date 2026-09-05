@@ -27,50 +27,58 @@ const normalizeCareer = (job: any, index: number): CareerOpportunity => ({
   benefits: Array.isArray(job?.benefits) ? job.benefits : [],
   experience: job?.experience || '',
   active: job?.active ?? job?.is_active ?? job?.isActive ?? true,
-  displayOrder: Number.isFinite(job?.displayOrder) ? job.displayOrder : (Number.isFinite(job?.display_order) ? job.display_order : index),
+  displayOrder: Number.isFinite(job?.displayOrder)
+    ? job.displayOrder
+    : (Number.isFinite(job?.display_order) ? job.display_order : index),
 });
 
-// Careers intentionally use JSON storage tables instead of public.careers.
-// The existing public.careers schema uses UUID ids and a different column set,
-// while the admin UI stores the complete CareerOpportunity object. Keeping one
-// JSON record avoids schema drift and guarantees the public page reads exactly
-// what the admin saved.
+// Careers have one authoritative persistence location.  The old implementation
+// wrote to two different settings tables and then preferred website_settings on
+// reads.  If that older copy was stale, every refresh restored the old jobs and
+// made newly-added jobs appear to disappear.  Keep the browser cache only as an
+// immediate local mirror and use site_settings as the durable source of truth.
 const persistCareerList = async (items: CareerOpportunity[]) => {
   const careers = (Array.isArray(items) ? items : []).map((job: any, index: number) => normalizeCareer(job, index));
   localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(careers));
 
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return careers;
 
-  const payload = { key: 'careers', value: careers, updated_at: new Date().toISOString() };
-  let websiteSettingsError: any = null;
-  let siteSettingsError: any = null;
+  const payload = {
+    key: 'careers',
+    value: careers,
+    updated_at: new Date().toISOString()
+  };
 
-  try {
-    const { error } = await legacy.supabase
-      .from('website_settings')
-      .upsert(payload, { onConflict: 'key' });
-    websiteSettingsError = error;
-  } catch (error) {
-    websiteSettingsError = error;
-  }
-
-  // Keep a second durable copy because this project has historically used both
-  // settings tables in different versions of the CMS.
   try {
     const { error } = await legacy.supabase
       .from('site_settings')
       .upsert(payload, { onConflict: 'key' });
-    siteSettingsError = error;
+
+    if (error) {
+      console.error('[Careers] Supabase save failed:', error);
+      throw error;
+    }
+
+    // Verify the exact value that was written. This prevents the UI from
+    // reporting success when a stale/blocked write was actually rejected.
+    const { data, error: verifyError } = await legacy.supabase
+      .from('site_settings')
+      .select('value')
+      .eq('key', 'careers')
+      .maybeSingle();
+
+    if (verifyError) throw verifyError;
+    if (!data || !Array.isArray((data as any).value)) {
+      throw new Error('Careers save verification failed: saved record was not returned.');
+    }
+
+    const verified = (data as any).value.map((job: any, index: number) => normalizeCareer(job, index));
+    localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(verified));
+    return verified;
   } catch (error) {
-    siteSettingsError = error;
+    console.error('[Careers] Durable persistence failed:', error);
+    throw error;
   }
-
-  if (websiteSettingsError && siteSettingsError) {
-    console.error('[Careers] Both Supabase persistence targets failed:', websiteSettingsError, siteSettingsError);
-    throw websiteSettingsError;
-  }
-
-  return careers;
 };
 
 const persistApplicationList = async (items: JobApplication[]) => {
@@ -115,20 +123,25 @@ const persistApplicationList = async (items: JobApplication[]) => {
 const readCareerSettings = async () => {
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return null;
 
-  // Prefer website_settings, then fall back to site_settings.
-  const targets = ['website_settings', 'site_settings'];
-  for (const table of targets) {
-    try {
-      const { data, error } = await legacy.supabase
-        .from(table)
-        .select('value')
-        .eq('key', 'careers')
-        .maybeSingle();
-      if (error) continue;
-      if (data && Array.isArray((data as any).value)) return (data as any).value;
-    } catch {
-      // Try the second settings table.
+  // Only read the authoritative careers record. Never fall back to the old
+  // website_settings copy because it can contain the pre-fix job list.
+  try {
+    const { data, error } = await legacy.supabase
+      .from('site_settings')
+      .select('value')
+      .eq('key', 'careers')
+      .maybeSingle();
+
+    if (error) {
+      console.error('[Careers] Supabase load failed:', error);
+      return null;
     }
+
+    if (data && Array.isArray((data as any).value)) {
+      return (data as any).value;
+    }
+  } catch (error) {
+    console.error('[Careers] Careers read failed:', error);
   }
 
   return null;
@@ -139,6 +152,8 @@ const wrappedSyncAllFromSupabase = async () => {
   if (!data) return data;
 
   if (legacy.supabase && legacy.isSupabaseConfigured) {
+    // The legacy sync may still return the historical careers list. Replace it
+    // immediately with the authoritative site_settings record.
     const savedCareers = await readCareerSettings();
     if (savedCareers) {
       data.careers = savedCareers.map((item: any, index: number) => normalizeCareer(item, index));
