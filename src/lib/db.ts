@@ -88,13 +88,28 @@ const persistApplicationList = async (items: JobApplication[]) => {
     created_at: item.appliedAt || new Date().toISOString()
   })).filter((row: any) => row.id && row.applicant_name && row.email);
 
+  if (!rows.length) return applications;
+
   try {
-    if (rows.length) {
+    // Public Careers submissions only have INSERT permission. A normal
+    // upsert also requires UPDATE permission and can therefore silently fail
+    // for anonymous visitors. Use INSERT + ignoreDuplicates for public users;
+    // authenticated admins retain full upsert behavior for edits/status changes.
+    const { data: sessionData } = await legacy.supabase.auth.getSession();
+    const isAuthenticated = Boolean(sessionData?.session?.user);
+
+    if (isAuthenticated) {
       const { error } = await legacy.supabase
         .from('job_applications')
         .upsert(rows, { onConflict: 'id' });
       if (error) throw error;
+    } else {
+      const { error } = await legacy.supabase
+        .from('job_applications')
+        .insert(rows, { onConflict: 'id', ignoreDuplicates: true });
+      if (error) throw error;
     }
+
     return applications;
   } catch (error) {
     console.error('[Applications] Supabase persistence failed:', error);
