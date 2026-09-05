@@ -13,6 +13,8 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     if (removedIds.length) {
       const { error } = await legacy.supabase.from('careers').delete().in('id', removedIds);
       if (error) throw error;
+      const { data: stillThere } = await legacy.supabase.from('careers').select('id').in('id', removedIds);
+      if (stillThere?.length) throw new Error('Career deletion was not persisted');
     }
     if (careers.length) {
       const rows = careers.map((job: any, index: number) => ({
@@ -35,7 +37,6 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
       const { error } = await legacy.supabase.from('careers').upsert(rows, { onConflict: 'id' });
       if (error) throw error;
     }
-    await legacy.saveWebsiteSetting('careers', careers);
   }
   localStorage.setItem('apnakhaiyal_careers', JSON.stringify(careers));
   return careers;
@@ -63,6 +64,8 @@ const persistApplicationList = async (items: JobApplication[]) => {
     if (removedIds.length) {
       const { error } = await legacy.supabase.from('job_applications').delete().in('id', removedIds);
       if (error) throw error;
+      const { data: stillThere } = await legacy.supabase.from('job_applications').select('id').in('id', removedIds);
+      if (stillThere?.length) throw new Error('Application deletion was not persisted');
     }
     if (rows.length) {
       const { error } = await legacy.supabase.from('job_applications').upsert(rows, { onConflict: 'id' });
