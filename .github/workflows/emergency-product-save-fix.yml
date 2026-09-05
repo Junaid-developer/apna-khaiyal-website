@@ -1,0 +1,36 @@
+name: Emergency product multi-image save fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/emergency-product-save-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch localStorage quota handling
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          old = """const setStored = <T>(key: string, value: T) => {\n  localStorage.setItem(`apnakhaiyal_${key}`, JSON.stringify(value));\n};"""
+          new = """const setStored = <T>(key: string, value: T) => {\n  try {\n    localStorage.setItem(`apnakhaiyal_${key}`, JSON.stringify(value));\n  } catch (error: any) {\n    // Large multi-image product payloads can exceed browser localStorage quota.\n    // Do not let this abort the Admin Product Save submit handler.\n    console.warn(`[localStorage] Could not persist ${key}; remote persistence will continue.`, error?.message || error);\n  }\n};"""
+          if old not in s:
+              raise SystemExit('Expected setStored block not found; refusing unsafe patch')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          git diff --cached --quiet || git commit -m 'Fix multi-image product save quota error'
+          git push
