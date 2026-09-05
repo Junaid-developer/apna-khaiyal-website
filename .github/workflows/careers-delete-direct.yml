@@ -1,0 +1,76 @@
+name: Fix Careers delete persistence
+on:
+  push:
+    branches: [main, master]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch saveCareers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getJobApplications:)"
+          replacement = '''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
+  saveCareers: (items: CareerOpportunity[]) => {
+    setStored('careers', items);
+    if (!supabase || !isSupabaseConfigured) return;
+
+    void (async () => {
+      try {
+        const rows = (Array.isArray(items) ? items : []).map((item: CareerOpportunity, index: number) => ({
+          id: item.id,
+          title: item.title || '',
+          department: item.department || 'General',
+          location: item.location || 'Bahawalpur, Pakistan',
+          type: item.type || 'job',
+          experience: (item as any).experience || '',
+          description: item.description || '',
+          requirements: Array.isArray(item.requirements) ? item.requirements : [],
+          responsibilities: Array.isArray(item.benefits) ? item.benefits : [],
+          benefits: Array.isArray(item.benefits) ? item.benefits : [],
+          is_active: item.active !== false,
+          active: item.active !== false,
+          isActive: item.active !== false,
+          displayOrder: (item as any).displayOrder ?? index + 1,
+          updated_at: new Date().toISOString()
+        }));
+
+        const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
+        if (existingErr) throw existingErr;
+        const incomingIds = new Set(rows.map(r => r.id));
+        const removedIds = (existing || []).map((r: any) => r.id).filter((id: string) => !incomingIds.has(id));
+        if (removedIds.length) {
+          const { error } = await supabase.from('careers').delete().in('id', removedIds);
+          if (error) throw error;
+        }
+        if (rows.length) {
+          const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
+          if (error) throw error;
+        }
+      } catch (error) {
+        console.error('[Careers Persistence] Failed saving careers:', error);
+      }
+    })();
+  },'''
+          ns, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('saveCareers block not found; no source changes made')
+          p.write_text(ns)
+          PY
+          git diff --check
+      - name: Commit source fix and remove patch workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db.ts .github/workflows/careers-delete-direct.yml
+          git commit -m "Fix Careers deletion persistence" || exit 0
+          git push
