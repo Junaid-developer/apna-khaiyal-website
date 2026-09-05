@@ -1,0 +1,112 @@
+name: Fix Job Applications Display
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message != 'fix: apply job applications display patch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch application persistence and admin display
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path, old, new, label):
+              p = Path(path)
+              s = p.read_text(encoding='utf-8')
+              if old not in s:
+                  raise SystemExit(f'Missing expected code for {label} in {path}')
+              p.write_text(s.replace(old, new, 1), encoding='utf-8')
+              print(f'patched {label}')
+
+          replace(
+              'src/App.tsx',
+              """  const handleSaveApplications = (data: JobApplication[]) => {\n    setApplications(data);\n    dbStore.saveApplications(data);\n  };""",
+              """  const handleSaveApplications = async (data: JobApplication[]) => {\n    // Persist first so the Careers form never reports success before Supabase\n    // has accepted the application. Then update the in-memory admin state.\n    await dbStore.saveApplications(data);\n    setApplications(data);\n  };""",
+              'App application save'
+          )
+
+          replace(
+              'src/App.tsx',
+              """  const handleAddApplication = (newApp: JobApplication) => {\n    const updated = [newApp, ...applications];\n    handleSaveApplications(updated);\n  };""",
+              """  const handleAddApplication = async (newApp: JobApplication) => {\n    const updated = [newApp, ...applications];\n    await handleSaveApplications(updated);\n  };""",
+              'App application append'
+          )
+
+          replace(
+              'src/components/CareersView.tsx',
+              """interface CareersViewProps {\n  opportunities: CareerOpportunity[];\n  onAddApplication: (app: JobApplication) => void;\n}""",
+              """interface CareersViewProps {\n  opportunities: CareerOpportunity[];\n  onAddApplication: (app: JobApplication) => void | Promise<void>;\n}""",
+              'Careers callback type'
+          )
+
+          replace(
+              'src/components/CareersView.tsx',
+              """  const handleFormSubmit = (e: FormEvent) => {\n    e.preventDefault();""",
+              """  const handleFormSubmit = async (e: FormEvent) => {\n    e.preventDefault();""",
+              'Careers async submit'
+          )
+
+          replace(
+              'src/components/CareersView.tsx',
+              """    onAddApplication(newApp);\n    setFormSubmitted(true);""",
+              """    try {\n      await onAddApplication(newApp);\n      setFormSubmitted(true);\n      setFormError('');\n    } catch (error: any) {\n      console.error('[Careers] Application submission failed:', error);\n      setFormError(error?.message || 'Unable to submit your application right now. Please try again.');\n      return;\n    }""",
+              'Careers submit persistence handling'
+          )
+
+          # Remove the now-duplicated success lines left by the original submit block.
+          p = Path('src/components/CareersView.tsx')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace("""      setFormError('');\n    } catch (error: any) {\n      console.error('[Careers] Application submission failed:', error);\n      setFormError(error?.message || 'Unable to submit your application right now. Please try again.');\n      return;\n    }\n    setFormError('');""", """      setFormError('');\n    } catch (error: any) {\n      console.error('[Careers] Application submission failed:', error);\n      setFormError(error?.message || 'Unable to submit your application right now. Please try again.');\n      return;\n    }""", 1)
+          p.write_text(s, encoding='utf-8')
+
+          # Dashboard: always fetch the authoritative job_applications table when the
+          # dashboard mounts/refetches. The parent prop can otherwise remain stale.
+          p = Path('src/components/DashboardOverview.tsx')
+          s = p.read_text(encoding='utf-8')
+          old = """  const [liveMetrics, setLiveMetrics] = useState<any | null>(null);\n  const [liveAdminsCount, setLiveAdminsCount] = useState<number>(1);"""
+          new = """  const [liveMetrics, setLiveMetrics] = useState<any | null>(null);\n  const [liveAdminsCount, setLiveAdminsCount] = useState<number>(1);\n  const [liveApplications, setLiveApplications] = useState<JobApplication[]>([]);"""
+          if old not in s: raise SystemExit('Missing dashboard application state')
+          s = s.replace(old, new, 1)
+
+          anchor = """  useEffect(() => {\n    if (cachedAdmins && cachedAdmins.length > 0) {\n      setLiveAdminsCount(cachedAdmins.length);\n    }\n  }, [cachedAdmins]);"""
+          insertion = anchor + """\n\n  // Job Applications are loaded directly from Supabase for the admin dashboard.\n  // This prevents a stale/empty App prop from hiding newly submitted candidates.\n  useEffect(() => {\n    let cancelled = false;\n    const loadApplications = async () => {\n      if (!isSupabaseConfigured) return;\n      try {\n        const { data, error } = await (await import('../lib/db')).supabase\n          .from('job_applications')\n          .select('*')\n          .order('created_at', { ascending: false });\n        if (error) throw error;\n        if (cancelled) return;\n        const mapped = (data || []).map((item: any) => ({\n          id: item.id || '',\n          jobId: item.job_id || '',\n          jobTitle: item.job_title || 'General Application',\n          fullName: item.applicant_name || item.applicantName || '',\n          email: item.email || '',\n          phone: item.phone || '',\n          coverLetter: item.cover_note || item.coverLetter || '',\n          resumeUrl: item.resume_url || item.resumeUrl || '',\n          status: item.status || 'New',\n          appliedAt: item.created_at || item.appliedAt || ''\n        })).filter((item: JobApplication) => item.id);\n        setLiveApplications(mapped);\n      } catch (error) {\n        console.error('[Dashboard] Job applications live load failed:', error);\n      }\n    };\n    loadApplications();\n    return () => { cancelled = true; };\n  }, [isSupabaseConfigured]);"""
+          if anchor not in s: raise SystemExit('Missing dashboard admin cache anchor')
+          s = s.replace(anchor, insertion, 1)
+
+          old = """  const safeApplications = Array.isArray(applications) ? applications : [];"""
+          new = """  const safeApplications = liveApplications.length > 0\n    ? liveApplications\n    : (Array.isArray(applications) ? applications : []);"""
+          if old not in s: raise SystemExit('Missing dashboard safeApplications')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          print('patched dashboard application loading')
+
+      - name: Verify and commit
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx src/components/CareersView.tsx src/components/DashboardOverview.tsx
+          git diff --cached --quiet && { echo "No changes needed"; exit 0; }
+          git commit -m "fix: apply job applications display patch"
+          git push
+
+      - name: Remove one-time workflow
+        if: success()
+        shell: bash
+        run: |
+          git rm -f .github/workflows/fix-job-applications-display.yml || true
+          git commit -m "chore: remove one-time job applications fixer" || true
+          git push || true
