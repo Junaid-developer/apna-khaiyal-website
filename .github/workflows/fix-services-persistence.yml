@@ -1,0 +1,44 @@
+name: Fix services persistence
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix-services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch services save flow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          db = Path('src/lib/db.ts')
+          s = db.read_text()
+          old = """  saveServices: (items: ServiceItem[]) => {\n    setStored('services', items);\n    syncTableToSupabase('services', items);\n  },"""
+          new = """  saveServices: async (items: ServiceItem[]) => {\n    // Persist to local storage immediately, but DO NOT fire-and-forget the\n    // Supabase write. Awaiting it prevents a later refresh from restoring\n    // stale service descriptions while the previous save is still pending.\n    setStored('services', items);\n    await syncTableToSupabase('services', items);\n  },"""
+          if old not in s:
+              raise SystemExit('Expected saveServices block not found')
+          db.write_text(s.replace(old, new, 1))
+
+          app = Path('src/App.tsx')
+          s = app.read_text()
+          old = """  const handleSaveServices = (data: ServiceItem[]) => {\n    setServices(data);\n    dbStore.saveServices(data);\n  };"""
+          new = """  const handleSaveServices = async (data: ServiceItem[]) => {\n    // Wait until Supabase confirms the save before treating the edit as\n    // persisted. This prevents stale background syncs from winning a race.\n    await dbStore.saveServices(data);\n    setServices(data);\n  };"""
+          if old not in s:
+              raise SystemExit('Expected handleSaveServices block not found')
+          app.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db.ts src/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: await services Supabase persistence"
+          git push
