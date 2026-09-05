@@ -1,0 +1,48 @@
+name: One-time Careers RPC persistence fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-careers-rpc.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Careers save flow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          marker = "  if (!legacy.supabase || !legacy.isSupabaseConfigured) return careers;\n"
+          rpc = """  if (!legacy.supabase || !legacy.isSupabaseConfigured) return careers;\n\n  // Use an authenticated SECURITY DEFINER RPC for Careers writes. This makes the\n  // admin save atomic and avoids browser-side RLS/session edge cases.\n  const { error: rpcError } = await legacy.supabase.rpc('save_careers', { p_careers: careers });\n  if (!rpcError) return careers;\n  console.error('[Careers] RPC persistence failed, falling back to direct table writes:', rpcError);\n"""
+          if marker not in s:
+              raise SystemExit('db.ts marker not found')
+          if "rpc('save_careers'" not in s:
+              s = s.replace(marker, rpc, 1)
+          p.write_text(s)
+
+          p = Path('src/App.tsx')
+          s = p.read_text()
+          old = """  const handleSaveCareers = (data: CareerOpportunity[]) => {\n    setCareers(data);\n    dbStore.saveCareers(data);\n  };"""
+          new = """  const handleSaveCareers = async (data: CareerOpportunity[]) => {\n    try {\n      await dbStore.saveCareers(data);\n      setCareers(data);\n    } catch (error) {\n      console.error('[Careers] Save failed:', error);\n      throw error;\n    }\n  };"""
+          if old not in s:
+              raise SystemExit('App.tsx save handler not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts src/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix Careers persistence with admin RPC'
+          git push
