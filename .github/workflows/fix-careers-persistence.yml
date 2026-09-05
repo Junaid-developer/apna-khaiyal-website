@@ -11,64 +11,48 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Patch persistence logic
-        shell: python
+      - name: Patch db persistence
         run: |
+          python3 - <<'PY'
           from pathlib import Path
           import re
           p = Path('src/lib/db.ts')
           s = p.read_text()
-
-          new_careers = '''getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
+          careers = '''getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
   saveCareers: async (items: CareerOpportunity[]) => {
     const careers = Array.isArray(items) ? items : [];
     setStored('careers', careers);
-
     if (!supabase) return careers;
-
     try {
       const { data: existingRows } = await supabase.from('careers').select('id');
       const existingIds = (existingRows || []).map((r: any) => r.id).filter(Boolean);
       const incomingIds = careers.map((j: any) => j?.id).filter(Boolean);
       const incomingSet = new Set(incomingIds);
       const idsToDelete = existingIds.filter((id: string) => !incomingSet.has(id));
-
       if (idsToDelete.length) {
         const { error } = await supabase.from('careers').delete().in('id', idsToDelete);
         if (error) console.warn('[Careers] delete notice:', error.message);
       }
-
       if (careers.length) {
         const rows = careers.map((job: any) => ({
-          id: job.id,
-          title: job.title || '',
-          type: job.type || 'job',
-          department: job.department || 'General',
-          location: job.location || '',
+          id: job.id, title: job.title || '', type: job.type || 'job',
+          department: job.department || 'General', location: job.location || '',
           description: job.description || '',
           requirements: Array.isArray(job.requirements) ? job.requirements : [],
           responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),
-          experience: job.experience || '',
-          is_active: job.active !== false,
-          active: job.active !== false,
-          isActive: job.active !== false
+          experience: job.experience || '', is_active: job.active !== false,
+          active: job.active !== false, isActive: job.active !== false
         }));
         const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
         if (error) console.warn('[Careers] upsert notice:', error.message);
       }
-
       await saveWebsiteSetting('careers', careers);
-    } catch (e) {
-      console.warn('[Careers] persistence notice:', e);
-    }
+    } catch (e) { console.warn('[Careers] persistence notice:', e); }
     return careers;
   },'''
-
-          s2, n1 = re.subn(r"getCareers:\s*\(\): CareerOpportunity\[\] =>.*?\n\s*saveCareers:\s*async \(items: CareerOpportunity\[\]\) => \{.*?\n\s*\},", new_careers, s, count=1, flags=re.S)
-          if n1 != 1:
-              raise SystemExit('saveCareers block not found')
-
-          new_apps = '''getApplications: (): JobApplication[] => getStored('applications', []),
+          s, n = re.subn(r"getCareers:\s*\(\): CareerOpportunity\[\] =>.*?\n\s*saveCareers:\s*async \(items: CareerOpportunity\[\]\) => \{.*?\n\s*\},", careers, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('saveCareers block not found')
+          apps = '''getApplications: (): JobApplication[] => getStored('applications', []),
   saveApplications: async (items: JobApplication[]) => {
     const applications = Array.isArray(items) ? items : [];
     setStored('applications', applications);
@@ -84,19 +68,13 @@ jobs:
         if (error) console.warn('[Applications] delete notice:', error.message);
       }
       await syncTableToSupabase('job_applications', applications);
-    } catch (e) {
-      console.warn('[Applications] persistence notice:', e);
-    }
+    } catch (e) { console.warn('[Applications] persistence notice:', e); }
   },'''
-          s3, n2 = re.subn(r"getApplications:\s*\(\): JobApplication\[\] =>.*?\n\s*saveApplications:\s*\([^)]*\) => \{.*?\n\s*\},", new_apps, s2, count=1, flags=re.S)
-          if n2 != 1:
-              raise SystemExit('saveApplications block not found')
-
-          if s3 == s:
-              raise SystemExit('No source changes made')
-          p.write_text(s3)
-          print('Patched db.ts')
-      - name: Commit patch
+          s, n = re.subn(r"getApplications:\s*\(\): JobApplication\[\] =>.*?\n\s*saveApplications:\s*\([^)]*\) => \{.*?\n\s*\},", apps, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('saveApplications block not found')
+          p.write_text(s)
+          PY
+      - name: Commit patched source
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
