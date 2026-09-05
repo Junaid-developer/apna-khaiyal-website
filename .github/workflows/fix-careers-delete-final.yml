@@ -1,0 +1,85 @@
+name: Fix careers deletion persistence
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch db persistence logic
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          old = '''  saveCareers: async (items: CareerOpportunity[]) => {'''
+          start = s.find(old)
+          if start < 0:
+              raise SystemExit('saveCareers start not found')
+          end_marker = '''\n  getApplications: (): JobApplication[] =>'''
+          end = s.find(end_marker, start)
+          if end < 0:
+              raise SystemExit('saveCareers end not found')
+          new = '''  saveCareers: async (items: CareerOpportunity[]) => {
+    // The dedicated careers table is the single source of truth. Never merge
+    // with legacy website_settings here: that resurrects jobs after deletion.
+    const incoming = Array.isArray(items) ? items.filter((job: any) => job?.id) : [];
+
+    if (supabase) {
+      try {
+        const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
+        if (existingErr) throw existingErr;
+
+        const incomingIds = incoming.map((job: any) => job.id);
+        const removedIds = (existing || []).map((row: any) => row.id).filter((id: string) => !incomingIds.includes(id));
+        if (removedIds.length) {
+          const { error: deleteErr } = await supabase.from('careers').delete().in('id', removedIds);
+          if (deleteErr) throw deleteErr;
+        }
+
+        if (incoming.length) {
+          const rows = incoming.map((job: any) => ({
+            id: job.id,
+            title: job.title || '',
+            type: job.type || 'job',
+            department: job.department || 'General',
+            location: job.location || '',
+            description: job.description || '',
+            requirements: Array.isArray(job.requirements) ? job.requirements : [],
+            responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),
+            experience: job.experience || '',
+            is_active: job.active !== false,
+            active: job.active !== false,
+            isActive: job.active !== false
+          }));
+          const { error: upsertErr } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
+          if (upsertErr) throw upsertErr;
+        }
+      } catch (e) {
+        console.error('[Careers] authoritative persistence failed:', e);
+        throw e;
+      }
+    }
+
+    // Keep browser cache exactly equal to the authoritative list.
+    setStored('careers', incoming);
+    return incoming;
+  },
+'''
+          s = s[:start] + new + s[end:]
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db.ts
+          git diff --cached --quiet || git commit -m "fix: prevent careers resurrection after delete"
+          git push
