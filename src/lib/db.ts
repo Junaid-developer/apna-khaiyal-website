@@ -78,9 +78,8 @@ const persistApplicationList = async (items: JobApplication[]) => {
     applicant_name: item.fullName || item.applicantName || '',
     email: item.email || item.applicantEmail || '',
     phone: item.phone || '',
+    experience: item.experience || '',
     cover_note: item.coverLetter || item.cover_note || '',
-    // Never send a full resume data URL into the database. A 5MB file becomes
-    // roughly 6.7MB of text and can make the application insert fail.
     resume_url: typeof item.resumeUrl === 'string' && item.resumeUrl.startsWith('data:') ? '' : (item.resumeUrl || item.resume_url || ''),
     status: item.status || 'New',
     created_at: item.appliedAt || new Date().toISOString()
@@ -89,20 +88,14 @@ const persistApplicationList = async (items: JobApplication[]) => {
   if (!rows.length) return applications;
 
   try {
-    const { data: sessionData } = await legacy.supabase.auth.getSession();
-    const isAuthenticated = Boolean(sessionData?.session?.user);
-
-    if (isAuthenticated) {
-      const { error } = await legacy.supabase
-        .from('job_applications')
-        .upsert(rows, { onConflict: 'id' });
-      if (error) throw error;
-    } else {
-      const { error } = await legacy.supabase
-        .from('job_applications')
-        .insert(rows, { onConflict: 'id', ignoreDuplicates: true });
-      if (error) throw error;
-    }
+    // Public applications only need INSERT permission. Using upsert for an
+    // authenticated visitor can require UPDATE/SELECT RLS permissions and
+    // incorrectly reject a brand-new application. Each application already
+    // has a fresh UUID, so insert-only is the safest durable operation.
+    const { error } = await legacy.supabase
+      .from('job_applications')
+      .insert(rows);
+    if (error) throw error;
 
     return applications;
   } catch (error) {
@@ -155,6 +148,7 @@ const wrappedSyncAllFromSupabase = async () => {
         fullName: item.applicant_name || '',
         email: item.email || '',
         phone: item.phone || '',
+        experience: item.experience || '',
         coverLetter: item.cover_note || '',
         resumeUrl: item.resume_url || '',
         status: item.status || 'New',
