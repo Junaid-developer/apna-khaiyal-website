@@ -404,9 +404,11 @@ export default function App() {
     dbStore.saveAbout(data);
   };
 
-  const handleSaveServices = (data: ServiceItem[]) => {
+  const handleSaveServices = async (data: ServiceItem[]) => {
+    // Wait until Supabase confirms the save before treating the edit as
+    // persisted. This prevents stale background syncs from winning a race.
+    await dbStore.saveServices(data);
     setServices(data);
-    dbStore.saveServices(data);
   };
 
   const handleSaveProducts = (data: ProductItem[]) => {

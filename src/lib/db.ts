@@ -1864,9 +1864,12 @@ export const dbStore = {
   },
 
   getServices: (): ServiceItem[] => getStored('services', DEFAULT_SERVICES).sort((a, b) => a.displayOrder - b.displayOrder),
-  saveServices: (items: ServiceItem[]) => {
+  saveServices: async (items: ServiceItem[]) => {
+    // Persist to local storage immediately, but DO NOT fire-and-forget the
+    // Supabase write. Awaiting it prevents a later refresh from restoring
+    // stale service descriptions while the previous save is still pending.
     setStored('services', items);
-    syncTableToSupabase('services', items);
+    await syncTableToSupabase('services', items);
   },
 
   getProducts: (): ProductItem[] => getStored('products', DEFAULT_PRODUCTS).sort((a, b) => a.displayOrder - b.displayOrder),
