@@ -37,7 +37,9 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     try {
       const { data: existing, error: existingErr } = await legacy.supabase.from('careers').select('id');
-      if (!existingErr) {
+      if (!existingErr && careers.length > 0) {
+        // Only calculate deletions from a non-empty authoritative list.
+        // A stale/empty Admin state must never delete every remote career.
         const incomingIds = new Set(careers.map((job: any) => job.id));
         const removedIds = (existing || []).map((row: any) => row.id).filter((id: string) => !incomingIds.has(id));
         addTombstones(CAREER_TOMBSTONES_KEY, removedIds);
@@ -66,7 +68,7 @@ const persistApplicationList = async (items: JobApplication[]) => {
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     try {
       const { data: existing, error: existingErr } = await legacy.supabase.from('job_applications').select('id');
-      if (!existingErr) {
+      if (!existingErr && applications.length > 0) {
         const rows = applications.map((item: any) => ({
           id: item.id, job_id: item.jobId || null, job_title: item.jobTitle || 'General Application',
           applicant_name: item.fullName || '', email: item.email || '', phone: item.phone || '',
@@ -86,13 +88,21 @@ const persistApplicationList = async (items: JobApplication[]) => {
 
 const wrappedSyncAllFromSupabase = async () => {
   // Capture local state BEFORE the legacy sync runs, because the legacy sync can
-  // overwrite localStorage with the remote 10-row snapshot.
+  // overwrite localStorage with the remote snapshot.
   const localCareers = readLocalList<CareerOpportunity>('apnakhaiyal_careers');
   const localApplications = readLocalList<JobApplication>('apnakhaiyal_applications');
   const data = await legacy.syncAllFromSupabase();
   if (!data) return data;
 
   if (Array.isArray(data.careers)) {
+    // A previous buggy save could have created tombstones for all remote careers.
+    // If local state was empty but Supabase still has the full career set, those
+    // tombstones are stale. Clear only that broken all-rows condition.
+    const careerTombstones = readTombstones(CAREER_TOMBSTONES_KEY);
+    if (localCareers.length === 0 && data.careers.length > 0 && careerTombstones.length >= data.careers.length) {
+      localStorage.removeItem(CAREER_TOMBSTONES_KEY);
+    }
+
     const byId = new Map<string, CareerOpportunity>();
     for (const job of data.careers as CareerOpportunity[]) if (job?.id) byId.set(job.id, job);
     for (const job of localCareers) if (job?.id) byId.set(job.id, job);
@@ -101,6 +111,11 @@ const wrappedSyncAllFromSupabase = async () => {
   }
 
   if (Array.isArray(data.applications)) {
+    const applicationTombstones = readTombstones(APPLICATION_TOMBSTONES_KEY);
+    if (localApplications.length === 0 && data.applications.length > 0 && applicationTombstones.length >= data.applications.length) {
+      localStorage.removeItem(APPLICATION_TOMBSTONES_KEY);
+    }
+
     const byId = new Map<string, JobApplication>();
     for (const item of data.applications as JobApplication[]) if (item?.id) byId.set(item.id, item);
     for (const item of localApplications) if (item?.id) byId.set(item.id, item);
