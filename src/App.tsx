@@ -492,9 +492,11 @@ export default function App() {
   };
 
   // Append new application from Careers Portal
-  const handleAddApplication = (newApp: JobApplication) => {
-    const updated = [newApp, ...applications];
-    handleSaveApplications(updated);
+  const handleAddApplication = async (newApp: JobApplication) => {
+    // Applications are append-only. Write only the new row to Supabase so a
+    // stale React array can never overwrite or hide previously submitted rows.
+    await dbStore.saveApplications([newApp]);
+    setApplications(prev => [newApp, ...prev]);
   };
 
   // Append message from Contact Desk
