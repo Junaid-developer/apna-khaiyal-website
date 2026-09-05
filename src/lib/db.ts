@@ -23,6 +23,13 @@ const filterTombstones = <T extends { id?: string }>(items: T[], key: string): T
   return items.filter(item => item?.id && !deleted.has(item.id));
 };
 
+const readLocalList = <T>(key: string): T[] => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(stored) ? stored : [];
+  } catch { return []; }
+};
+
 const persistCareerList = async (items: CareerOpportunity[]) => {
   const careers = Array.isArray(items) ? items.filter((job: any) => job?.id) : [];
   localStorage.setItem('apnakhaiyal_careers', JSON.stringify(careers));
@@ -78,15 +85,14 @@ const persistApplicationList = async (items: JobApplication[]) => {
 };
 
 const wrappedSyncAllFromSupabase = async () => {
+  // Capture local state BEFORE the legacy sync runs, because the legacy sync can
+  // overwrite localStorage with the remote 10-row snapshot.
+  const localCareers = readLocalList<CareerOpportunity>('apnakhaiyal_careers');
+  const localApplications = readLocalList<JobApplication>('apnakhaiyal_applications');
   const data = await legacy.syncAllFromSupabase();
   if (!data) return data;
 
   if (Array.isArray(data.careers)) {
-    let localCareers: CareerOpportunity[] = [];
-    try {
-      const stored = JSON.parse(localStorage.getItem('apnakhaiyal_careers') || '[]');
-      if (Array.isArray(stored)) localCareers = stored;
-    } catch {}
     const byId = new Map<string, CareerOpportunity>();
     for (const job of data.careers as CareerOpportunity[]) if (job?.id) byId.set(job.id, job);
     for (const job of localCareers) if (job?.id) byId.set(job.id, job);
@@ -95,11 +101,6 @@ const wrappedSyncAllFromSupabase = async () => {
   }
 
   if (Array.isArray(data.applications)) {
-    let localApplications: JobApplication[] = [];
-    try {
-      const stored = JSON.parse(localStorage.getItem('apnakhaiyal_applications') || '[]');
-      if (Array.isArray(stored)) localApplications = stored;
-    } catch {}
     const byId = new Map<string, JobApplication>();
     for (const item of data.applications as JobApplication[]) if (item?.id) byId.set(item.id, item);
     for (const item of localApplications) if (item?.id) byId.set(item.id, item);
