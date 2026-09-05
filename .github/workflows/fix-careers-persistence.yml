@@ -31,7 +31,10 @@ jobs:
       const incomingIds = careers.map((j: any) => j?.id).filter(Boolean);
       const incomingSet = new Set(incomingIds);
       const idsToDelete = existingIds.filter((id: string) => !incomingSet.has(id));
-      if (idsToDelete.length) await supabase.from('careers').delete().in('id', idsToDelete);
+      if (idsToDelete.length) {
+        const { error } = await supabase.from('careers').delete().in('id', idsToDelete);
+        if (error) throw error;
+      }
       if (careers.length) {
         const dbRows = careers.map((job: any) => ({
           id: job.id, title: job.title || '', type: job.type || 'job',
@@ -42,7 +45,8 @@ jobs:
           experience: job.experience || '', is_active: job.active !== false,
           active: job.active !== false, isActive: job.active !== false
         }));
-        await supabase.from('careers').upsert(dbRows, { onConflict: 'id' });
+        const { error } = await supabase.from('careers').upsert(dbRows, { onConflict: 'id' });
+        if (error) throw error;
       }
       await saveWebsiteSetting('careers', careers);
     } catch (e) { console.warn('[Careers] persistence:', e); }
@@ -51,10 +55,8 @@ jobs:
 """
           s=s[:start]+new+s[end:]
           start=s.index("  getApplications:")
-          # replace through the next property after saveApplications
           m=re.search(r"  getApplications:[\\s\\S]*?\n  },(?=\n  [A-Za-z_]+:)",s[start:])
           if not m: raise SystemExit('applications block not found')
-          old=s[start:start+m.end()]
           apps="""  getApplications: (): JobApplication[] => getStored('applications', []),
   saveApplications: async (items: JobApplication[]) => {
     const applications = Array.isArray(items) ? items : [];
@@ -66,7 +68,10 @@ jobs:
       const incomingIds = applications.map((a: any) => a?.id).filter(Boolean);
       const incomingSet = new Set(incomingIds);
       const idsToDelete = existingIds.filter((id: string) => !incomingSet.has(id));
-      if (idsToDelete.length) await supabase.from('job_applications').delete().in('id', idsToDelete);
+      if (idsToDelete.length) {
+        const { error } = await supabase.from('job_applications').delete().in('id', idsToDelete);
+        if (error) throw error;
+      }
       if (applications.length) await syncTableToSupabase('job_applications', applications);
     } catch (e) { console.warn('[Applications] persistence:', e); }
   },"""
