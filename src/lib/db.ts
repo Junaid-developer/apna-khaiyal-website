@@ -31,7 +31,11 @@ const readLocalList = <T>(key: string): T[] => {
 };
 
 const persistCareerList = async (items: CareerOpportunity[]) => {
-  const careers = Array.isArray(items) ? items.filter((job: any) => job?.id) : [];
+  const input = Array.isArray(items) ? items : [];
+  const careers = input.map((job: any, index: number) => ({
+    ...job,
+    id: job?.id || `career_${Date.now()}_${index}`,
+  }));
   const previousCareers = readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY);
   localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(careers));
 
@@ -44,6 +48,8 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     .map((job: any) => job?.id)
     .filter((id): id is string => !!id && !incomingIds.has(id));
 
+  // Use only the canonical columns that exist in the careers table. This avoids
+  // failures caused by older Data API schema caches for legacy duplicate columns.
   const rows = careers.map((job: any, index: number) => ({
     id: job.id,
     title: job.title || '',
@@ -55,12 +61,8 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     responsibilities: Array.isArray(job.responsibilities)
       ? job.responsibilities
       : (Array.isArray(job.benefits) ? job.benefits : []),
-    benefits: Array.isArray(job.benefits) ? job.benefits : [],
     experience: job.experience || '',
     is_active: job.active !== false,
-    active: job.active !== false,
-    isActive: job.active !== false,
-    displayOrder: job.displayOrder ?? index + 1,
     updated_at: new Date().toISOString()
   }));
 
@@ -136,8 +138,6 @@ const wrappedSyncAllFromSupabase = async () => {
   if (!data) return data;
 
   if (legacy.supabase && legacy.isSupabaseConfigured) {
-    // Re-read these two tables directly so legacy local/default fallbacks cannot
-    // resurrect deleted records. Empty remote tables intentionally produce [].
     try {
       const { data: careerRows, error: careerError } = await legacy.supabase
         .from('careers')
@@ -198,7 +198,6 @@ export const syncAllFromSupabase = wrappedSyncAllFromSupabase;
 
 export const dbStore = {
   ...legacy.dbStore,
-  // When Supabase is configured, do not seed Careers from DEFAULT_CAREERS.
   getCareers: () => legacy.isSupabaseConfigured ? [] : legacy.dbStore.getCareers(),
   getApplications: () => legacy.isSupabaseConfigured ? [] : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
