@@ -143,8 +143,19 @@ const readCareerSettings = async () => {
 };
 
 const wrappedSyncAllFromSupabase = async () => {
+  // IMPORTANT: capture locally cached applications BEFORE the legacy sync.
+  // The legacy sync writes an empty array to its old local-storage key when
+  // Supabase returns no application rows. That used to erase a just-submitted
+  // application before the dashboard could reload it after a hard refresh.
+  const cachedApplicationsBeforeSync = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
+
   const data = await legacy.syncAllFromSupabase();
-  if (!data) return data;
+  if (!data) {
+    if (cachedApplicationsBeforeSync.length > 0) {
+      localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync));
+    }
+    return data;
+  }
 
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     const savedCareers = await readCareerSettings();
@@ -174,16 +185,26 @@ const wrappedSyncAllFromSupabase = async () => {
         appliedAt: item.created_at || ''
       })).filter((item: JobApplication) => item.id);
 
-      const cachedApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
       const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
-      const pendingLocalApplications = cachedApplications.filter((item: JobApplication) => item.id && !remoteIds.has(item.id));
+      const pendingLocalApplications = cachedApplicationsBeforeSync.filter(
+        (item: JobApplication) => item.id && !remoteIds.has(item.id)
+      );
+
+      // Never let an empty remote result erase a locally cached submission.
+      // Once Supabase is fixed, the remote row is used automatically and the
+      // temporary local copy is removed by this merge on the next refresh.
       data.applications = [...pendingLocalApplications, ...remoteApplications];
       localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
     } catch (error) {
       console.error('[Applications] Direct Supabase sync failed:', error);
-      const cachedApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-      if (cachedApplications.length > 0) data.applications = cachedApplications;
+      if (cachedApplicationsBeforeSync.length > 0) {
+        data.applications = cachedApplicationsBeforeSync;
+        localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync));
+      }
     }
+  } else if (cachedApplicationsBeforeSync.length > 0) {
+    data.applications = cachedApplicationsBeforeSync;
+    localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync));
   }
 
   return data;
