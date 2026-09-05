@@ -154,6 +154,10 @@ const wrappedSyncAllFromSupabase = async () => {
       localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
     } catch (error) {
       console.error('[Applications] Direct Supabase sync failed:', error);
+      // Keep the last known local applications if the admin read is temporarily
+      // blocked by an RLS/session issue instead of replacing them with [].
+      const cachedApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
+      if (cachedApplications.length > 0) data.applications = cachedApplications;
     }
   }
 
@@ -164,8 +168,8 @@ export const syncAllFromSupabase = wrappedSyncAllFromSupabase;
 
 export const dbStore = {
   ...legacy.dbStore,
-  getCareers: () => legacy.isSupabaseConfigured ? [] : legacy.dbStore.getCareers(),
-  getApplications: () => legacy.isSupabaseConfigured ? [] : legacy.dbStore.getApplications(),
+  getCareers: () => legacy.isSupabaseConfigured ? readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY) : legacy.dbStore.getCareers(),
+  getApplications: () => legacy.isSupabaseConfigured ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY) : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
   saveApplications: persistApplicationList,
 };
