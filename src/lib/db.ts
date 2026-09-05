@@ -32,22 +32,13 @@ const normalizeCareer = (job: any, index: number): CareerOpportunity => ({
     : (Number.isFinite(job?.display_order) ? job.display_order : index),
 });
 
-// Careers have one authoritative persistence location.  The old implementation
-// wrote to two different settings tables and then preferred website_settings on
-// reads.  If that older copy was stale, every refresh restored the old jobs and
-// made newly-added jobs appear to disappear.  Keep the browser cache only as an
-// immediate local mirror and use site_settings as the durable source of truth.
 const persistCareerList = async (items: CareerOpportunity[]) => {
   const careers = (Array.isArray(items) ? items : []).map((job: any, index: number) => normalizeCareer(job, index));
   localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(careers));
 
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return careers;
 
-  const payload = {
-    key: 'careers',
-    value: careers,
-    updated_at: new Date().toISOString()
-  };
+  const payload = { key: 'careers', value: careers, updated_at: new Date().toISOString() };
 
   try {
     const { error } = await legacy.supabase
@@ -59,8 +50,6 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
       throw error;
     }
 
-    // Verify the exact value that was written. This prevents the UI from
-    // reporting success when a stale/blocked write was actually rejected.
     const { data, error: verifyError } = await legacy.supabase
       .from('site_settings')
       .select('value')
@@ -81,36 +70,37 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   }
 };
 
+const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
 const persistApplicationList = async (items: JobApplication[]) => {
   const applications = Array.isArray(items) ? items : [];
-  const previousApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(applications));
 
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return applications;
 
+  // public.careers is no longer the source of truth for Careers; it uses a
+  // JSON settings record and therefore its frontend IDs are not necessarily
+  // UUIDs. job_applications.job_id is a UUID foreign key, so only send it when
+  // the selected job actually has a valid UUID. Always preserve job_title.
   const rows = applications.map((item: any) => ({
-    id: item.id,
-    job_id: item.jobId || null,
+    id: isUuid(item.id) ? item.id : crypto.randomUUID(),
+    job_id: isUuid(item.jobId) ? item.jobId : null,
     job_title: item.jobTitle || 'General Application',
-    applicant_name: item.fullName || '',
-    email: item.email || '',
+    applicant_name: item.fullName || item.applicantName || '',
+    email: item.email || item.applicantEmail || '',
     phone: item.phone || '',
-    cover_note: item.coverLetter || '',
-    resume_url: item.resumeUrl || '',
+    cover_note: item.coverLetter || item.cover_note || '',
+    resume_url: item.resumeUrl || item.resume_url || '',
     status: item.status || 'New',
     created_at: item.appliedAt || new Date().toISOString()
   })).filter((row: any) => row.id && row.applicant_name && row.email);
 
-  const incomingIds = new Set(rows.map((row: any) => row.id));
-  const removedIds = previousApplications.map((item: any) => item?.id).filter((id): id is string => !!id && !incomingIds.has(id));
-
   try {
-    if (removedIds.length) {
-      const { error } = await legacy.supabase.from('job_applications').delete().in('id', removedIds);
-      if (error) throw error;
-    }
     if (rows.length) {
-      const { error } = await legacy.supabase.from('job_applications').upsert(rows, { onConflict: 'id' });
+      const { error } = await legacy.supabase
+        .from('job_applications')
+        .upsert(rows, { onConflict: 'id' });
       if (error) throw error;
     }
     return applications;
@@ -123,8 +113,6 @@ const persistApplicationList = async (items: JobApplication[]) => {
 const readCareerSettings = async () => {
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return null;
 
-  // Only read the authoritative careers record. Never fall back to the old
-  // website_settings copy because it can contain the pre-fix job list.
   try {
     const { data, error } = await legacy.supabase
       .from('site_settings')
@@ -137,9 +125,7 @@ const readCareerSettings = async () => {
       return null;
     }
 
-    if (data && Array.isArray((data as any).value)) {
-      return (data as any).value;
-    }
+    if (data && Array.isArray((data as any).value)) return (data as any).value;
   } catch (error) {
     console.error('[Careers] Careers read failed:', error);
   }
@@ -152,8 +138,6 @@ const wrappedSyncAllFromSupabase = async () => {
   if (!data) return data;
 
   if (legacy.supabase && legacy.isSupabaseConfigured) {
-    // The legacy sync may still return the historical careers list. Replace it
-    // immediately with the authoritative site_settings record.
     const savedCareers = await readCareerSettings();
     if (savedCareers) {
       data.careers = savedCareers.map((item: any, index: number) => normalizeCareer(item, index));
@@ -161,13 +145,23 @@ const wrappedSyncAllFromSupabase = async () => {
     }
 
     try {
-      const { data: applicationRows, error: applicationError } = await legacy.supabase.from('job_applications').select('*').order('created_at', { ascending: false });
+      const { data: applicationRows, error: applicationError } = await legacy.supabase
+        .from('job_applications')
+        .select('*')
+        .order('created_at', { ascending: false });
       if (applicationError) throw applicationError;
+
       data.applications = (applicationRows || []).map((item: any) => ({
-        id: item.id || '', jobId: item.job_id || item.jobId || '', jobTitle: item.job_title || item.jobTitle || 'General Application',
-        fullName: item.applicant_name || item.fullName || '', email: item.email || '', phone: item.phone || '',
-        coverLetter: item.cover_note || item.coverLetter || '', resumeUrl: item.resume_url || item.resumeUrl || '', status: item.status || 'New',
-        appliedAt: item.created_at || item.appliedAt || ''
+        id: item.id || '',
+        jobId: item.job_id || '',
+        jobTitle: item.job_title || 'General Application',
+        fullName: item.applicant_name || '',
+        email: item.email || '',
+        phone: item.phone || '',
+        coverLetter: item.cover_note || '',
+        resumeUrl: item.resume_url || '',
+        status: item.status || 'New',
+        appliedAt: item.created_at || ''
       })).filter((item: JobApplication) => item.id);
       localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
     } catch (error) {
