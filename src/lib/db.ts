@@ -3,23 +3,8 @@ import type { CareerOpportunity, JobApplication } from '../types';
 
 export * from './db_legacy';
 
-// Careers and job applications use Supabase as the source of truth when configured.
-// Old local tombstones and local snapshots must never be merged back into live data.
 const CAREERS_CACHE_KEY = 'apnakhaiyal_careers';
 const APPLICATIONS_CACHE_KEY = 'apnakhaiyal_applications';
-const OLD_CAREER_TOMBSTONES_KEY = 'apnakhaiyal_deleted_careers';
-const OLD_APPLICATION_TOMBSTONES_KEY = 'apnakhaiyal_deleted_applications';
-
-if (legacy.isSupabaseConfigured) {
-  try {
-    localStorage.removeItem(CAREERS_CACHE_KEY);
-    localStorage.removeItem(APPLICATIONS_CACHE_KEY);
-    localStorage.removeItem(OLD_CAREER_TOMBSTONES_KEY);
-    localStorage.removeItem(OLD_APPLICATION_TOMBSTONES_KEY);
-  } catch {
-    // Ignore storage access errors; Supabase remains authoritative.
-  }
-}
 
 const readLocalList = <T>(key: string): T[] => {
   try {
@@ -30,88 +15,29 @@ const readLocalList = <T>(key: string): T[] => {
   }
 };
 
+// SIMPLE CAREERS STORAGE:
+// Keep Careers in the existing website_settings table only. This avoids the
+// dedicated careers table/RLS/auth complexity that was causing refresh loss.
 const persistCareerList = async (items: CareerOpportunity[]) => {
-  const input = Array.isArray(items) ? items : [];
-  const careers = input.map((job: any, index: number) => ({
+  const careers = (Array.isArray(items) ? items : []).map((job: any, index: number) => ({
     ...job,
     id: job?.id || `career_${Date.now()}_${index}`,
   }));
-  const previousCareers = readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY);
+
   localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(careers));
 
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return careers;
 
-  // Use an authenticated SECURITY DEFINER RPC for Careers writes. This makes the
-  // admin save atomic and avoids browser-side RLS/session edge cases.
-  const { error: rpcError } = await legacy.supabase.rpc('save_careers', { p_careers: careers });
-  if (!rpcError) return careers;
-  console.error('[Careers] RPC persistence failed, falling back to direct table writes:', rpcError);
+  const { error } = await legacy.supabase
+    .from('website_settings')
+    .upsert({ key: 'careers', value: careers, updated_at: new Date().toISOString() }, { onConflict: 'key' });
 
-  const incomingIds = new Set(careers.map((job: any) => job.id));
-  const removedIds = previousCareers
-    .map((job: any) => job?.id)
-    .filter((id): id is string => !!id && !incomingIds.has(id));
-
-  const rows = careers.map((job: any) => ({
-    id: job.id,
-    title: job.title || '',
-    type: job.type || 'job',
-    department: job.department || 'General',
-    location: job.location || '',
-    description: job.description || '',
-    requirements: Array.isArray(job.requirements) ? job.requirements : [],
-    responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),
-    experience: job.experience || '',
-    is_active: job.active !== false,
-    active: job.active !== false,
-    benefits: Array.isArray(job.benefits) ? job.benefits : [],
-    displayOrder: Number.isFinite(job.displayOrder) ? job.displayOrder : 0,
-    isActive: job.active !== false,
-    updated_at: new Date().toISOString()
-  }));
-
-  try {
-    if (removedIds.length) {
-      const { error } = await legacy.supabase.from('careers').delete().in('id', removedIds);
-      if (error) throw error;
-    }
-
-    if (rows.length) {
-      // Insert new IDs directly and update existing IDs separately.
-      const { data: existingRows, error: existingError } = await legacy.supabase
-        .from('careers')
-        .select('id')
-        .in('id', rows.map((row: any) => row.id));
-      if (existingError) throw existingError;
-
-      const existingIds = new Set((existingRows || []).map((row: any) => row.id));
-      const newRows = rows.filter((row: any) => !existingIds.has(row.id));
-      const existingCareerRows = rows.filter((row: any) => existingIds.has(row.id));
-
-      if (newRows.length) {
-        const { error } = await legacy.supabase.from('careers').insert(newRows);
-        if (error) throw error;
-      }
-
-      for (const row of existingCareerRows) {
-        const { id, ...changes } = row;
-        const { error } = await legacy.supabase.from('careers').update(changes).eq('id', id);
-        if (error) throw error;
-      }
-    }
-
-    // Durable mirror: this table is writable under the current production RLS
-    // configuration and protects against the dedicated careers table being
-    // temporarily unavailable or rejected by a client-side RLS/session mismatch.
-    if (typeof (legacy as any).saveWebsiteSetting === 'function') {
-      await (legacy as any).saveWebsiteSetting('careers', careers);
-    }
-
-    return careers;
-  } catch (error) {
-    console.error('[Careers] Supabase persistence failed:', error);
+  if (error) {
+    console.error('[Careers] Save failed:', error);
     throw error;
   }
+
+  return careers;
 };
 
 const persistApplicationList = async (items: JobApplication[]) => {
@@ -159,23 +85,33 @@ const wrappedSyncAllFromSupabase = async () => {
 
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     try {
-      const { data: careerRows, error: careerError } = await legacy.supabase.from('careers').select('*').order('displayOrder', { ascending: true });
-      if (careerError) throw careerError;
-      let sourceCareerRows: any[] = careerRows || [];
-      if (sourceCareerRows.length === 0) {
-        const { data: mirrorRow } = await legacy.supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
-        if (mirrorRow && Array.isArray((mirrorRow as any).value)) sourceCareerRows = (mirrorRow as any).value;
+      // Careers are read from the same simple website_settings record used by saveCareers.
+      const { data: careerSetting, error } = await legacy.supabase
+        .from('website_settings')
+        .select('value')
+        .eq('key', 'careers')
+        .maybeSingle();
+      if (error) throw error;
+
+      if (careerSetting && Array.isArray((careerSetting as any).value)) {
+        data.careers = (careerSetting as any).value.map((item: any, index: number) => ({
+          id: item?.id || `career_${index}`,
+          title: item?.title || '',
+          type: item?.type || 'job',
+          department: item?.department || 'General',
+          location: item?.location || '',
+          description: item?.description || '',
+          requirements: Array.isArray(item?.requirements) ? item.requirements : [],
+          responsibilities: Array.isArray(item?.responsibilities) ? item.responsibilities : [],
+          benefits: Array.isArray(item?.benefits) ? item.benefits : [],
+          experience: item?.experience || '',
+          active: item?.active ?? item?.is_active ?? item?.isActive ?? true,
+          displayOrder: item?.displayOrder ?? item?.display_order ?? index
+        }));
+        localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers));
       }
-      data.careers = sourceCareerRows.map((item: any) => ({
-        id: item.id || '', title: item.title || '', type: item.type || 'job', department: item.department || 'General',
-        location: item.location || '', description: item.description || '', requirements: Array.isArray(item.requirements) ? item.requirements : [],
-        responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : [], benefits: Array.isArray(item.benefits) ? item.benefits : [],
-        experience: item.experience || '', active: item.active ?? item.is_active ?? item.isActive ?? true,
-        displayOrder: item.displayOrder ?? item.display_order ?? 0
-      })).filter((item: CareerOpportunity) => item.id);
-      localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers));
     } catch (error) {
-      console.error('[Careers] Direct Supabase sync failed:', error);
+      console.error('[Careers] Website settings sync failed:', error);
     }
 
     try {
@@ -192,6 +128,7 @@ const wrappedSyncAllFromSupabase = async () => {
       console.error('[Applications] Direct Supabase sync failed:', error);
     }
   }
+
   return data;
 };
 
