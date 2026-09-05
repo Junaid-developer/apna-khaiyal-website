@@ -15,86 +15,43 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Patch About persistence
         shell: python
         run: |
           from pathlib import Path
           import re
-
-          db = Path('src/lib/db.ts')
-          text = db.read_text(encoding='utf-8')
-
-          # Make About saving schema-safe and wait for both legacy mirrors to
-          # persist, then read the canonical website_settings row back.
-          pattern = re.compile(r"  getAbout: \(\): AboutData => getStored\('about', DEFAULT_ABOUT\),\n  saveAbout: \(data: AboutData\) => \{\n    setStored\('about', data\);\n    saveWebsiteSetting\('about', data\);\n  \},")
-          replacement = """  getAbout: (): AboutData => getStored('about', DEFAULT_ABOUT),
+          db=Path('src/lib/db.ts'); text=db.read_text(encoding='utf-8')
+          p=re.compile(r"  getAbout: \(\): AboutData => getStored\('about', DEFAULT_ABOUT\),\n  saveAbout: \(data: AboutData\) => \{\n    setStored\('about', data\);\n    saveWebsiteSetting\('about', data\);\n  \},")
+          r="""  getAbout: (): AboutData => getStored('about', DEFAULT_ABOUT),
   saveAbout: async (data: AboutData) => {
     setStored('about', data);
     if (!supabase) return;
-
     const now = new Date().toISOString();
-    const payload = {
-      id: 'about',
-      key: 'about',
-      value: data,
-      updated_at: now
-    };
-
     try {
-      // `key` is the logical unique identifier used by both settings stores.
-      const { error: websiteError } = await supabase
-        .from('website_settings')
-        .upsert(payload, { onConflict: 'key' });
-      if (websiteError) throw websiteError;
-
-      // Keep the legacy mirror in sync so no background read can restore stale About data.
-      const { error: siteError } = await supabase
-        .from('site_settings')
-        .upsert({ key: 'about', value: data, updated_at: now }, { onConflict: 'key' });
-      if (siteError) throw siteError;
-
-      // Verify the exact value that was persisted.
-      const { data: verified, error: verifyError } = await supabase
-        .from('website_settings')
-        .select('value')
-        .eq('key', 'about')
-        .maybeSingle();
-      if (verifyError) throw verifyError;
-      if (verified?.value) setStored('about', verified.value as AboutData);
-    } catch (error) {
-      console.error('[saveAbout] Supabase persistence failed:', error);
-      throw error;
-    }
+      const { error: e1 } = await supabase.from('website_settings').upsert({ key:'about', value:data, updated_at:now }, { onConflict:'key' });
+      if (e1) throw e1;
+      const { error: e2 } = await supabase.from('site_settings').upsert({ key:'about', value:data, updated_at:now }, { onConflict:'key' });
+      if (e2) throw e2;
+      const { data:v, error:e3 } = await supabase.from('website_settings').select('value').eq('key','about').maybeSingle();
+      if (e3) throw e3;
+      if (v?.value) setStored('about', v.value as AboutData);
+    } catch (error) { console.error('[saveAbout] Supabase persistence failed:', error); throw error; }
   },"""
-          if not pattern.search(text):
-              raise SystemExit('Expected About save block not found; refusing unsafe edit.')
-          text = pattern.sub(replacement, text, count=1)
-          db.write_text(text, encoding='utf-8')
-
-          app = Path('src/App.tsx')
-          text = app.read_text(encoding='utf-8')
-          pattern = re.compile(r"  const handleSaveAbout = \(data: AboutData\) => \{\n    setAbout\(data\);\n    dbStore\.saveAbout\(data\);\n  \};")
-          replacement = """  const handleSaveAbout = async (data: AboutData) => {
-    // Do not let a background sync race overwrite an About edit before
-    // Supabase confirms that the new value is actually persisted.
+          if not p.search(text): raise SystemExit('Expected About save block not found')
+          db.write_text(p.sub(r,text,count=1),encoding='utf-8')
+          app=Path('src/App.tsx'); text=app.read_text(encoding='utf-8')
+          p=re.compile(r"  const handleSaveAbout = \(data: AboutData\) => \{\n    setAbout\(data\);\n    dbStore\.saveAbout\(data\);\n  \};")
+          r="""  const handleSaveAbout = async (data: AboutData) => {
     await dbStore.saveAbout(data);
     setAbout(data);
   };"""
-          if not pattern.search(text):
-              raise SystemExit('Expected App About save block not found; refusing unsafe edit.')
-          text = pattern.sub(replacement, text, count=1)
-          app.write_text(text, encoding='utf-8')
-
+          if not p.search(text): raise SystemExit('Expected App About save block not found')
+          app.write_text(p.sub(r,text,count=1),encoding='utf-8')
       - name: Commit fix
-        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/db.ts src/App.tsx
-          if git diff --cached --quiet; then
-            echo "No changes needed"
-            exit 0
-          fi
+          if git diff --cached --quiet; then echo "No changes needed"; exit 0; fi
           git commit -m "fix: persist About edits reliably"
           git push
