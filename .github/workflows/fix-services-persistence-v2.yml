@@ -1,0 +1,106 @@
+name: Fix services persistence v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-services-persistence-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Patch services persistence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          db = Path('src/lib/db.ts')
+          s = db.read_text()
+
+          old = """  saveServices: async (items: ServiceItem[]) => {
+    // Persist to local storage immediately, but DO NOT fire-and-forget the
+    // Supabase write. Awaiting it prevents a later refresh from restoring
+    // stale service descriptions while the previous save is still pending.
+    setStored('services', items);
+    await syncTableToSupabase('services', items);
+  },"""
+
+          new = """  saveServices: async (items: ServiceItem[]) => {
+    // Services use an explicit schema-safe Supabase write. The generic sync
+    // helper can send camelCase fields and silently fall back after an error,
+    // which can leave the database with the previous description. Persist the
+    // exact service columns and verify the rows before finishing the save.
+    setStored('services', items);
+    if (!supabase) return;
+
+    try {
+      for (const item of items) {
+        const payload: any = {
+          id: item.id,
+          title: item.title,
+          icon: item.icon || 'Globe',
+          description: item.description || '',
+          image: item.image || null,
+          display_order: item.displayOrder ?? 0,
+          is_active: (item as any).isActive ?? true,
+          category: (item as any).category ?? null,
+          updated_at: new Date().toISOString()
+        };
+
+        const { error } = await supabase
+          .from('services')
+          .upsert(payload, { onConflict: 'id' });
+
+        if (error) throw error;
+      }
+
+      // Read back what Supabase actually stored so stale local data cannot
+      // overwrite the newly saved descriptions later.
+      const { data: verified, error: verifyError } = await supabase
+        .from('services')
+        .select('*')
+        .order('display_order', { ascending: true });
+
+      if (verifyError) throw verifyError;
+
+      if (verified) {
+        const mapped = verified.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          icon: item.icon || 'Globe',
+          description: item.description || '',
+          displayOrder: item.displayOrder ?? item.display_order ?? 0,
+          image: item.image || undefined,
+          isActive: item.is_active ?? true,
+          category: item.category ?? undefined
+        }));
+        setStored('services', mapped);
+      }
+    } catch (error) {
+      console.error('[saveServices] Supabase persistence failed:', error);
+      throw error;
+    }
+  },"""
+
+          if old not in s:
+              raise SystemExit('Expected v1 saveServices block not found; refusing unsafe overwrite')
+          db.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/db.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: persist service edits with explicit schema"
+          git push
