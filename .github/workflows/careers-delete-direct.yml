@@ -18,7 +18,7 @@ jobs:
           import re
           p = Path('src/lib/db.ts')
           s = p.read_text()
-          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getApplications:)"
+          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getJobApplications:)"
           replacement = '''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
   saveCareers: (items: CareerOpportunity[]) => {
     setStored('careers', items);
@@ -35,7 +35,7 @@ jobs:
           experience: (item as any).experience || '',
           description: item.description || '',
           requirements: Array.isArray(item.requirements) ? item.requirements : [],
-          responsibilities: Array.isArray(item.benefits) ? item.benefits : [],
+          responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : (Array.isArray(item.benefits) ? item.benefits : []),
           benefits: Array.isArray(item.benefits) ? item.benefits : [],
           is_active: item.active !== false,
           active: item.active !== false,
