@@ -17,66 +17,63 @@ jobs:
           from pathlib import Path
           p = Path('src/lib/db.ts')
           s = p.read_text()
+          start_marker = "  saveCareers:"
+          end_marker = "\n  getApplications:"
+          start = s.find(start_marker)
+          end = s.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('Could not locate saveCareers block')
+          new_block = '''  saveCareers: async (items: CareerOpportunity[]) => {
+    // Dedicated careers table is authoritative. Never merge with legacy settings,
+    // because doing so resurrects records that the admin just deleted.
+    const incoming = Array.isArray(items) ? items.filter((job: any) => job?.id) : [];
 
-          s = s.replace("if (true) {\n        try {\n          const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();", "if (normalizedCareersList.length === 0) {\n        try {\n          const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();", 1)
+    if (supabase && isSupabaseConfigured) {
+      const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
+      if (existingErr) throw existingErr;
 
-          old = "  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),\n  saveCareers: (items: CareerOpportunity[]) => {\n    setStored('careers', items);\n    // Careers are stored in the dedicated careers table as the primary source of truth.\n    // Keep website_settings as a backward-compatible mirror for older deployments.\n    saveWebsiteSetting('careers', items);\n  },"
-          new = """  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
-  saveCareers: (items: CareerOpportunity[]) => {
-    setStored('careers', items);
-    if (!supabase || !isSupabaseConfigured) return;
+      const incomingIds = incoming.map((job: any) => job.id);
+      const removedIds = (existing || []).map((row: any) => row.id).filter((id: string) => !incomingIds.includes(id));
+      if (removedIds.length) {
+        const { error: deleteErr } = await supabase.from('careers').delete().in('id', removedIds);
+        if (deleteErr) throw deleteErr;
+      }
 
-    // Careers use the dedicated table as the single source of truth.
-    // Map the UI fields to the actual careers table schema.
-    void (async () => {
-      try {
-        const rows = (Array.isArray(items) ? items : []).map((item: CareerOpportunity, index: number) => ({
-          id: item.id,
-          title: item.title || '',
-          department: item.department || 'General',
-          location: item.location || 'Bahawalpur, Pakistan',
-          type: item.type || 'job',
-          experience: (item as any).experience || '',
-          description: item.description || '',
-          requirements: Array.isArray(item.requirements) ? item.requirements : [],
-          responsibilities: Array.isArray(item.benefits) ? item.benefits : [],
-          benefits: Array.isArray(item.benefits) ? item.benefits : [],
-          is_active: item.active !== false,
-          active: item.active !== false,
-          isActive: item.active !== false,
-          displayOrder: (item as any).displayOrder ?? index + 1,
+      if (incoming.length) {
+        const rows = incoming.map((job: any, index: number) => ({
+          id: job.id,
+          title: job.title || '',
+          department: job.department || 'General',
+          location: job.location || '',
+          type: job.type || 'job',
+          experience: job.experience || '',
+          description: job.description || '',
+          requirements: Array.isArray(job.requirements) ? job.requirements : [],
+          responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : [],
+          benefits: Array.isArray(job.benefits) ? job.benefits : [],
+          is_active: job.active !== false,
+          active: job.active !== false,
+          isActive: job.active !== false,
+          displayOrder: job.displayOrder ?? index + 1,
           updated_at: new Date().toISOString()
         }));
-
-        const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
-        if (existingErr) throw existingErr;
-        const incomingIds = rows.map(r => r.id);
-        const removedIds = (existing || []).map((r: any) => r.id).filter((id: string) => !incomingIds.includes(id));
-        if (removedIds.length) {
-          const { error } = await supabase.from('careers').delete().in('id', removedIds);
-          if (error) throw error;
-        }
-        if (rows.length) {
-          const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
-          if (error) throw error;
-        }
-      } catch (error) {
-        console.error('[Careers Persistence] Failed saving careers:', error);
+        const { error: upsertErr } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
+        if (upsertErr) throw upsertErr;
       }
-    })();
-  },"""
-          if old not in s:
-              raise SystemExit('saveCareers block not found')
-          s = s.replace(old, new, 1)
+    }
+
+    setStored('careers', incoming);
+    return incoming;
+  },'''
+          s = s[:start] + new_block + s[end:]
           p.write_text(s)
           PY
           git diff --check
       - name: Commit patched source
         run: |
-          rm -f .github/workflows/apply-careers-fix.yml .github/workflows/apply-careers-single-source.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/db.ts .github/workflows/apply-careers-fix.yml .github/workflows/apply-careers-single-source.yml
-          git diff --cached --quiet && exit 0
-          git commit -m "Fix Careers persistence using dedicated table"
+          git add src/lib/db.ts
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "fix: prevent careers resurrection after delete"
           git push
