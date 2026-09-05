@@ -16,7 +16,7 @@ const getProductImages = (product: ProductItem) => {
     ...(product.gallery || []).filter(Boolean),
     ...(product.images || []).filter(Boolean),
     ...relationalImages
-  ]));
+  ])).filter(src => !src.toLowerCase().includes('unsplash.com'));
 };
 
 function ProductImageSlider({ product }: { product: ProductItem }) {
