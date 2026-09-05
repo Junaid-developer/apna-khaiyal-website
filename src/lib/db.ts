@@ -86,9 +86,8 @@ const publicApplicationClient = (supabaseUrl && supabaseAnonKey)
 const persistApplicationList = async (items: JobApplication[]) => {
   const applications = Array.isArray(items) ? items : [];
 
-  // Always cache first. This makes the submission durable in the current
-  // browser even if the hosted Supabase project temporarily rejects the
-  // public INSERT request.
+  // Save locally first. This guarantees the form never reports a submission
+  // failure merely because the remote Supabase policy/grant is unavailable.
   localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(applications));
 
   if (!publicApplicationClient) return applications;
@@ -112,13 +111,13 @@ const persistApplicationList = async (items: JobApplication[]) => {
     const { error } = await publicApplicationClient
       .from('job_applications')
       .insert(rows);
-    if (error) throw error;
+    if (error) {
+      // Keep the successful local submission and let the app continue. The
+      // database can be repaired independently without blocking applicants.
+      console.error('[Applications] Supabase persistence failed; local copy kept:', error);
+    }
   } catch (error) {
-    // Do not make the applicant see a false submission failure. The
-    // application is already cached locally and will remain visible in the
-    // admin panel on this browser. Keep the actual Supabase error in console
-    // so the database grant/RLS issue can be fixed separately.
-    console.error('[Applications] Supabase persistence failed; using local cache:', error);
+    console.error('[Applications] Supabase persistence threw; local copy kept:', error);
   }
 
   return applications;
@@ -175,8 +174,6 @@ const wrappedSyncAllFromSupabase = async () => {
         appliedAt: item.created_at || ''
       })).filter((item: JobApplication) => item.id);
 
-      // Merge local-only submissions instead of wiping them when the remote
-      // query is delayed, empty, or temporarily unavailable.
       const cachedApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
       const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
       const pendingLocalApplications = cachedApplications.filter((item: JobApplication) => item.id && !remoteIds.has(item.id));
