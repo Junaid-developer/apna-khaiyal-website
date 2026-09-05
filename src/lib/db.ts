@@ -1,3 +1,4 @@
+import { createClient } from '@supabase/supabase-js';
 import * as legacy from './db_legacy';
 import type { CareerOpportunity, JobApplication } from '../types';
 
@@ -65,11 +66,28 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   }
 };
 
+const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+
+// Applications are public submissions. Use a dedicated client without the
+// admin/auth session so a logged-in admin cannot accidentally change the
+// request from the anon role to the authenticated role and hit a different
+// RLS/grant path.
+const publicApplicationClient = (supabaseUrl && supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    })
+  : null;
+
 const persistApplicationList = async (items: JobApplication[]) => {
   const applications = Array.isArray(items) ? items : [];
   localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(applications));
 
-  if (!legacy.supabase || !legacy.isSupabaseConfigured) return applications;
+  if (!publicApplicationClient) return applications;
 
   const rows = applications.map((item: any) => ({
     id: typeof item.id === 'string' && item.id.trim() ? item.id : crypto.randomUUID(),
@@ -78,7 +96,6 @@ const persistApplicationList = async (items: JobApplication[]) => {
     applicant_name: item.fullName || item.applicantName || '',
     email: item.email || item.applicantEmail || '',
     phone: item.phone || '',
-    experience: item.experience || '',
     cover_note: item.coverLetter || item.cover_note || '',
     resume_url: typeof item.resumeUrl === 'string' && item.resumeUrl.startsWith('data:') ? '' : (item.resumeUrl || item.resume_url || ''),
     status: item.status || 'New',
@@ -88,18 +105,13 @@ const persistApplicationList = async (items: JobApplication[]) => {
   if (!rows.length) return applications;
 
   try {
-    // Public applications only need INSERT permission. Using upsert for an
-    // authenticated visitor can require UPDATE/SELECT RLS permissions and
-    // incorrectly reject a brand-new application. Each application already
-    // has a fresh UUID, so insert-only is the safest durable operation.
-    const { error } = await legacy.supabase
+    const { error } = await publicApplicationClient
       .from('job_applications')
       .insert(rows);
     if (error) throw error;
-
     return applications;
   } catch (error) {
-    console.error('[Applications] Supabase persistence failed:', error);
+    console.error('[Applications] Public Supabase persistence failed:', error);
     throw error;
   }
 };
@@ -141,7 +153,7 @@ const wrappedSyncAllFromSupabase = async () => {
         .order('created_at', { ascending: false });
       if (applicationError) throw applicationError;
 
-      data.applications = (applicationRows || []).map((item: any) => ({
+      const remoteApplications = (applicationRows || []).map((item: any) => ({
         id: item.id || '',
         jobId: item.job_id || '',
         jobTitle: item.job_title || 'General Application',
@@ -154,6 +166,13 @@ const wrappedSyncAllFromSupabase = async () => {
         status: item.status || 'New',
         appliedAt: item.created_at || ''
       })).filter((item: JobApplication) => item.id);
+
+      // Do not wipe a freshly submitted local application when the remote
+      // query temporarily returns no rows. Merge local-only rows instead.
+      const cachedApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
+      const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
+      const pendingLocalApplications = cachedApplications.filter((item: JobApplication) => item.id && !remoteIds.has(item.id));
+      data.applications = [...pendingLocalApplications, ...remoteApplications];
       localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
     } catch (error) {
       console.error('[Applications] Direct Supabase sync failed:', error);
