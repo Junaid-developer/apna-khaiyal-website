@@ -1,4 +1,4 @@
-name: Fix Careers delete persistence
+name: Fix Careers persistence
 on:
   push:
     branches: [main, master]
@@ -6,24 +6,21 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Patch saveCareers
+      - name: Patch careers and application persistence
         run: |
           python - <<'PY'
           from pathlib import Path
           import re
           p = Path('src/lib/db.ts')
           s = p.read_text()
-          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getJobApplications:)"
-          replacement = '''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
+
+          careers = '''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
   saveCareers: async (items: CareerOpportunity[]) => {
-    // The Admin Panel passes the complete current careers list. Treat it as the source of truth
-    // so deleted jobs are removed from every persistent store instead of being merged back in.
     const careers = Array.isArray(items) ? items : [];
     setStored('careers', careers);
 
@@ -31,7 +28,6 @@ jobs:
 
     try {
       await saveWebsiteSetting('careers', careers);
-
       const rows = careers.map((item: CareerOpportunity, index: number) => ({
         id: item.id,
         title: item.title || '',
@@ -41,7 +37,7 @@ jobs:
         experience: (item as any).experience || '',
         description: item.description || '',
         requirements: Array.isArray(item.requirements) ? item.requirements : [],
-        responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : (Array.isArray(item.benefits) ? item.benefits : []),
+        responsibilities: Array.isArray((item as any).responsibilities) ? (item as any).responsibilities : (Array.isArray(item.benefits) ? item.benefits : []),
         benefits: Array.isArray(item.benefits) ? item.benefits : [],
         is_active: item.active !== false,
         active: item.active !== false,
@@ -66,16 +62,67 @@ jobs:
       console.error('[Careers Persistence] Failed saving careers:', error);
     }
   },'''
-          ns, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit('saveCareers block not found; no source changes made')
-          p.write_text(ns)
+
+          applications = '''  getApplications: (): JobApplication[] => getStored('applications', []),
+  saveApplications: async (items: JobApplication[]) => {
+    const applications = Array.isArray(items) ? items : [];
+    setStored('applications', applications);
+    if (!supabase || !isSupabaseConfigured) return;
+
+    try {
+      const rows = applications.map((item: JobApplication) => ({
+        id: item.id,
+        job_id: item.jobId || null,
+        job_title: item.jobTitle || 'General Application',
+        applicant_name: item.fullName || '',
+        email: item.email || '',
+        phone: item.phone || '',
+        cover_note: item.coverLetter || '',
+        resume_url: item.resumeUrl || '',
+        status: item.status || 'New',
+        created_at: item.appliedAt || new Date().toISOString()
+      })).filter((row: any) => row.applicant_name && row.email);
+
+      const { data: existing, error: existingErr } = await supabase.from('job_applications').select('id');
+      if (existingErr) throw existingErr;
+      const incomingIds = new Set(rows.map(r => r.id));
+      const removedIds = (existing || []).map((r: any) => r.id).filter((id: string) => !incomingIds.has(id));
+      if (removedIds.length) {
+        const { error } = await supabase.from('job_applications').delete().in('id', removedIds);
+        if (error) throw error;
+      }
+      if (rows.length) {
+        const { error } = await supabase.from('job_applications').upsert(rows, { onConflict: 'id' });
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error('[Job Applications Persistence] Failed saving applications:', error);
+    }
+  },'''
+
+          pattern_c = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getApplications:)"
+          s, n1 = re.subn(pattern_c, careers, s, count=1, flags=re.S)
+          if n1 != 1:
+              raise SystemExit('Careers block not found')
+
+          pattern_a = r"  getApplications: \(\): JobApplication\[\] => getStored\('applications', \[\]\),\n  saveApplications: .*?\n  },(?=\n\s*getMessages:)"
+          s, n2 = re.subn(pattern_a, applications, s, count=1, flags=re.S)
+          if n2 != 1:
+              raise SystemExit('Applications block not found')
+
+          p.write_text(s)
+          print('Patched Careers and Job Applications persistence')
           PY
           git diff --check
-      - name: Commit source fix
+      - name: Commit and push source fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/db.ts
-          git commit -m "Fix Careers deletion persistence" || exit 0
-          git push
+          git diff --cached --quiet && exit 0 || true
+          git commit -m "Fix Careers and job application deletion persistence"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
