@@ -1,0 +1,47 @@
+name: Fix multi-image product save
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-multi-image-save-now.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch safe local persistence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          old = '''const setStored = <T>(key: string, value: T) => {
+            localStorage.setItem(`apnakhaiyal_${key}`, JSON.stringify(value));
+          };'''
+          new = '''const setStored = <T>(key: string, value: T) => {
+            try {
+              localStorage.setItem(`apnakhaiyal_${key}`, JSON.stringify(value));
+            } catch (error: any) {
+              // Multiple product screenshots can exceed browser localStorage quota.
+              // Never let that exception abort the Save Product form submission.
+              console.warn(`[localStorage] Could not persist ${key}; continuing with remote persistence:`, error?.message || error);
+            }
+          };'''
+          if old not in s:
+              raise SystemExit('setStored block not found; refusing unsafe patch')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix Save Product with multiple images'
+          git push
