@@ -6,6 +6,7 @@ permissions:
   contents: write
 jobs:
   patch:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +19,7 @@ jobs:
           import re
           p = Path('src/lib/db.ts')
           s = p.read_text()
-          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getApplications:)"
+          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getJobApplications:)"
           replacement = '''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
   saveCareers: async (items: CareerOpportunity[]) => {
     // The Admin Panel passes the complete current careers list. Treat it as the source of truth
@@ -30,7 +31,6 @@ jobs:
 
     try {
       // Keep both legacy settings mirrors in exact sync with the Admin Panel list.
-      // saveWebsiteSetting writes to website_settings and site_settings.
       await saveWebsiteSetting('careers', careers);
 
       // Synchronize the dedicated careers table and explicitly delete rows removed in the UI.
@@ -77,7 +77,7 @@ jobs:
       - name: Commit source fix
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git.config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/db.ts
           git commit -m "Fix Careers deletion persistence" || exit 0
           git push
