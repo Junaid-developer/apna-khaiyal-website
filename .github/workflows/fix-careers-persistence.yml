@@ -1,0 +1,106 @@
+name: Fix careers persistence
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch persistence logic
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+
+          new_careers = '''getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
+  saveCareers: async (items: CareerOpportunity[]) => {
+    const careers = Array.isArray(items) ? items : [];
+    setStored('careers', careers);
+
+    if (!supabase) return careers;
+
+    try {
+      const { data: existingRows } = await supabase.from('careers').select('id');
+      const existingIds = (existingRows || []).map((r: any) => r.id).filter(Boolean);
+      const incomingIds = careers.map((j: any) => j?.id).filter(Boolean);
+      const incomingSet = new Set(incomingIds);
+      const idsToDelete = existingIds.filter((id: string) => !incomingSet.has(id));
+
+      if (idsToDelete.length) {
+        const { error } = await supabase.from('careers').delete().in('id', idsToDelete);
+        if (error) console.warn('[Careers] delete notice:', error.message);
+      }
+
+      if (careers.length) {
+        const rows = careers.map((job: any) => ({
+          id: job.id,
+          title: job.title || '',
+          type: job.type || 'job',
+          department: job.department || 'General',
+          location: job.location || '',
+          description: job.description || '',
+          requirements: Array.isArray(job.requirements) ? job.requirements : [],
+          responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),
+          experience: job.experience || '',
+          is_active: job.active !== false,
+          active: job.active !== false,
+          isActive: job.active !== false
+        }));
+        const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
+        if (error) console.warn('[Careers] upsert notice:', error.message);
+      }
+
+      await saveWebsiteSetting('careers', careers);
+    } catch (e) {
+      console.warn('[Careers] persistence notice:', e);
+    }
+    return careers;
+  },'''
+
+          s2, n1 = re.subn(r"getCareers:\s*\(\): CareerOpportunity\[\] =>.*?\n\s*saveCareers:\s*async \(items: CareerOpportunity\[\]\) => \{.*?\n\s*\},", new_careers, s, count=1, flags=re.S)
+          if n1 != 1:
+              raise SystemExit('saveCareers block not found')
+
+          new_apps = '''getApplications: (): JobApplication[] => getStored('applications', []),
+  saveApplications: async (items: JobApplication[]) => {
+    const applications = Array.isArray(items) ? items : [];
+    setStored('applications', applications);
+    if (!supabase) return applications;
+    try {
+      const { data: existingRows } = await supabase.from('job_applications').select('id');
+      const existingIds = (existingRows || []).map((r: any) => r.id).filter(Boolean);
+      const incomingIds = applications.map((a: any) => a?.id).filter(Boolean);
+      const incomingSet = new Set(incomingIds);
+      const idsToDelete = existingIds.filter((id: string) => !incomingSet.has(id));
+      if (idsToDelete.length) {
+        const { error } = await supabase.from('job_applications').delete().in('id', idsToDelete);
+        if (error) console.warn('[Applications] delete notice:', error.message);
+      }
+      await syncTableToSupabase('job_applications', applications);
+    } catch (e) {
+      console.warn('[Applications] persistence notice:', e);
+    }
+  },'''
+          s3, n2 = re.subn(r"getApplications:\s*\(\): JobApplication\[\] =>.*?\n\s*saveApplications:\s*\([^)]*\) => \{.*?\n\s*\},", new_apps, s2, count=1, flags=re.S)
+          if n2 != 1:
+              raise SystemExit('saveApplications block not found')
+
+          if s3 == s:
+              raise SystemExit('No source changes made')
+          p.write_text(s3)
+          print('Patched db.ts')
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix permanent careers and applications deletion'
+          git push
