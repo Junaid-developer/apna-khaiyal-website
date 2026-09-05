@@ -1,0 +1,40 @@
+name: Permanent Careers Delete Fix
+on:
+  push:
+    paths:
+      - '.github/workflows/permanent-careers-delete-fix.yml'
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch db sync logic
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/lib/db.ts')
+          s=p.read_text()
+          # Make dedicated careers table authoritative and prevent settings mirrors from resurrecting deleted IDs.
+          old_start="""      // Careers exist in multiple legacy stores in this project. NEVER let a shorter\n      // website_settings/site_settings snapshot overwrite the complete careers table.\n      // Merge all available sources by ID, preserving the complete union of records.\n      try {"""
+          old_end="""      } catch (careersFallbackErr) {\n        console.warn('[Supabase Sync] careers multi-source merge notice:', careersFallbackErr);\n      }"""
+          if old_start in s and old_end in s:
+            a=s.index(old_start); b=s.index(old_end,a)+len(old_end)
+            replacement="""      // The dedicated careers table is the single source of truth. Legacy settings mirrors\n      // must never be merged back because that resurrects records after an admin deletion.\n      // Only use a settings mirror when the dedicated table query itself failed.\n      try {\n        if (!careersErr && Array.isArray(rawCareers)) {\n          normalizedCareersList = rawCareers;\n        } else if (careersErr) {\n          const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();\n          if (setRow && Array.isArray((setRow as any).value)) normalizedCareersList = (setRow as any).value;\n          if (normalizedCareersList.length === 0) {\n            const { data: siteSetRow } = await supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();\n            if (siteSetRow && Array.isArray((siteSetRow as any).value)) normalizedCareersList = (siteSetRow as any).value;\n          }\n        }\n      } catch (careersFallbackErr) {\n        console.warn('[Supabase Sync] careers fallback notice:', careersFallbackErr);\n      }"""
+            s=s[:a]+replacement+s[b:]
+          # Remove the old second fallback that can rehydrate stale settings after an empty authoritative table.
+          s=re.sub(r"\n      /\* legacy fallback retained below only when the authoritative snapshot is unavailable \*/.*?\n      if \(normalizedCareersList\.length === 0\) \{.*?\n      \}\n\n      if \(normalizedCareersList\.length > 0\) \{", "\n      if (normalizedCareersList.length > 0) {", s, count=1, flags=re.S)
+          p.write_text(s)
+          print('patched db.ts')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'Make careers table authoritative on refresh'
+          git push
