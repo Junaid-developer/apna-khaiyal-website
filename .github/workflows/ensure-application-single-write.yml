@@ -1,0 +1,33 @@
+name: Ensure Application Single Write
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'fix: application single write'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch App handler
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/App.tsx')
+          s=p.read_text()
+          old="""  const handleAddApplication = (newApp: JobApplication) => {\n    const updated = [newApp, ...applications];\n    handleSaveApplications(updated);\n  };"""
+          new="""  const handleAddApplication = async (newApp: JobApplication) => {\n    await dbStore.saveApplications([newApp]);\n    setApplications(prev => [newApp, ...prev]);\n  };"""
+          if old not in s:
+              raise SystemExit('Application handler already patched or pattern missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/App.tsx
+          git commit -m 'fix: application single write'
+          git push
