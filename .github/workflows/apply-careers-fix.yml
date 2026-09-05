@@ -1,7 +1,7 @@
 name: Apply Careers persistence fix
 on:
   push:
-    branches: [fix/careers-persistence]
+    branches: [main]
 permissions:
   contents: write
 jobs:
