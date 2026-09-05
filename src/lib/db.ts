@@ -71,9 +71,7 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     }
 
     if (rows.length) {
-      // Do not use upsert for a brand-new job. Supabase RLS can reject the UPDATE
-      // half of an upsert even when INSERT is allowed. Insert new IDs directly,
-      // and only UPDATE rows that already exist.
+      // Insert new IDs directly and update existing IDs separately.
       const { data: existingRows, error: existingError } = await legacy.supabase
         .from('careers')
         .select('id')
@@ -94,6 +92,13 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
         const { error } = await legacy.supabase.from('careers').update(changes).eq('id', id);
         if (error) throw error;
       }
+    }
+
+    // Durable mirror: this table is writable under the current production RLS
+    // configuration and protects against the dedicated careers table being
+    // temporarily unavailable or rejected by a client-side RLS/session mismatch.
+    if (typeof (legacy as any).saveWebsiteSetting === 'function') {
+      await (legacy as any).saveWebsiteSetting('careers', careers);
     }
 
     return careers;
@@ -150,7 +155,12 @@ const wrappedSyncAllFromSupabase = async () => {
     try {
       const { data: careerRows, error: careerError } = await legacy.supabase.from('careers').select('*').order('displayOrder', { ascending: true });
       if (careerError) throw careerError;
-      data.careers = (careerRows || []).map((item: any) => ({
+      let sourceCareerRows: any[] = careerRows || [];
+      if (sourceCareerRows.length === 0) {
+        const { data: mirrorRow } = await legacy.supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
+        if (mirrorRow && Array.isArray((mirrorRow as any).value)) sourceCareerRows = (mirrorRow as any).value;
+      }
+      data.careers = sourceCareerRows.map((item: any) => ({
         id: item.id || '', title: item.title || '', type: item.type || 'job', department: item.department || 'General',
         location: item.location || '', description: item.description || '', requirements: Array.isArray(item.requirements) ? item.requirements : [],
         responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : [], benefits: Array.isArray(item.benefits) ? item.benefits : [],
