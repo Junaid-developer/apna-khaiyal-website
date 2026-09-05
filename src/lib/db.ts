@@ -581,7 +581,13 @@ const getStored = <T>(key: string, defaultValue: T): T => {
 };
 
 const setStored = <T>(key: string, value: T) => {
-  localStorage.setItem(`apnakhaiyal_${key}`, JSON.stringify(value));
+  try {
+    localStorage.setItem(`apnakhaiyal_${key}`, JSON.stringify(value));
+  } catch (error: any) {
+    // Multiple product screenshots can exceed browser localStorage quota.
+    // Never let that exception abort the Save Product form submission.
+    console.warn(`[localStorage] Could not persist ${key}; continuing with remote persistence:`, error?.message || error);
+  }
 };
 
 // Buckets assurance helper
