@@ -1,0 +1,81 @@
+name: Direct Careers Persistence Repair
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch db persistence
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/lib/db.ts')
+          s=p.read_text()
+          careers="""  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
+  saveCareers: async (items: CareerOpportunity[]) => {
+    const careers = Array.isArray(items) ? items : [];
+    setStored('careers', careers);
+    if (!supabase || !isSupabaseConfigured) return;
+    try {
+      const rows = careers.map((item: CareerOpportunity, index: number) => ({
+        id: item.id, title: item.title || '', department: item.department || 'General',
+        location: item.location || 'Bahawalpur, Pakistan', type: item.type || 'job',
+        experience: (item as any).experience || '', description: item.description || '',
+        requirements: Array.isArray(item.requirements) ? item.requirements : [],
+        responsibilities: Array.isArray((item as any).responsibilities) ? (item as any).responsibilities : (Array.isArray(item.benefits) ? item.benefits : []),
+        benefits: Array.isArray(item.benefits) ? item.benefits : [],
+        is_active: item.active !== false, active: item.active !== false, isActive: item.active !== false,
+        displayOrder: (item as any).displayOrder ?? index + 1, updated_at: new Date().toISOString()
+      }));
+      const { data: existing, error } = await supabase.from('careers').select('id');
+      if (error) throw error;
+      const incomingIds = new Set(rows.map(r => r.id));
+      const removedIds = (existing || []).map((r:any)=>r.id).filter((id:string)=>!incomingIds.has(id));
+      if (removedIds.length) { const {error:e}=await supabase.from('careers').delete().in('id', removedIds); if(e) throw e; }
+      if (rows.length) { const {error:e}=await supabase.from('careers').upsert(rows,{onConflict:'id'}); if(e) throw e; }
+      await saveWebsiteSetting('careers', careers);
+    } catch (error) { console.error('[Careers Persistence] Failed:', error); }
+  },"""
+          applications="""  getApplications: (): JobApplication[] => getStored('applications', []),
+  saveApplications: async (items: JobApplication[]) => {
+    const applications = Array.isArray(items) ? items : [];
+    setStored('applications', applications);
+    if (!supabase || !isSupabaseConfigured) return;
+    try {
+      const rows = applications.map((item: JobApplication) => ({
+        id:item.id, job_id:item.jobId||null, job_title:item.jobTitle||'General Application',
+        applicant_name:item.fullName||'', email:item.email||'', phone:item.phone||'',
+        cover_note:item.coverLetter||'', resume_url:item.resumeUrl||'', status:item.status||'New',
+        created_at:item.appliedAt||new Date().toISOString()
+      })).filter((r:any)=>r.applicant_name&&r.email);
+      const {data:existing,error}=await supabase.from('job_applications').select('id');
+      if(error) throw error;
+      const incomingIds=new Set(rows.map(r=>r.id));
+      const removedIds=(existing||[]).map((r:any)=>r.id).filter((id:string)=>!incomingIds.has(id));
+      if(removedIds.length){const {error:e}=await supabase.from('job_applications').delete().in('id',removedIds);if(e)throw e;}
+      if(rows.length){const {error:e}=await supabase.from('job_applications').upsert(rows,{onConflict:'id'});if(e)throw e;}
+    } catch(error){console.error('[Job Applications Persistence] Failed:',error);}
+  },"""
+          pc=r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getApplications:)"
+          pa=r"  getApplications: \(\): JobApplication\[\] => getStored\('applications', \[\]\),\n  saveApplications: .*?\n  },(?=\n\s*getMessages:)"
+          s,n1=re.subn(pc,careers,s,count=1,flags=re.S); s,n2=re.subn(pa,applications,s,count=1,flags=re.S)
+          if n1!=1 or n2!=1: raise SystemExit(f'patch mismatch careers={n1} applications={n2}')
+          p.write_text(s)
+          PY
+          git diff --check
+      - name: Commit repaired source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/db.ts
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Fix Careers and job application deletion persistence'
+          git push origin HEAD:main
