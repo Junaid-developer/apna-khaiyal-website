@@ -1,7 +1,7 @@
 name: Apply Careers persistence fix
 on:
   push:
-    branches: [main]
+    branches: [fix/careers-persistence]
 permissions:
   contents: write
 jobs:
@@ -11,23 +11,68 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Patch Careers persistence
+      - name: Patch Careers save persistence
         run: |
           python - <<'PY'
           from pathlib import Path
           p = Path('src/lib/db.ts')
           s = p.read_text()
+          old = """  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
+  saveCareers: async (items: CareerOpportunity[]) => {
+    // Careers must be additive/persistent: never replace the database array with a partial
+    // client-side list (which can happen when the Admin Panel has stale state).
+    const incoming = Array.isArray(items) ? items : [];
+    let existing: CareerOpportunity[] = [];
 
-          s = s.replace("if (true) {\n        try {\n          const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();", "if (normalizedCareersList.length === 0) {\n        try {\n          const { data: setRow } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();", 1)
+    try {
+      if (supabase) {
+        const { data: row } = await supabase.from('website_settings').select('value').eq('key', 'careers').maybeSingle();
+        if (row && Array.isArray((row as any).value)) existing = (row as any).value as CareerOpportunity[];
+      }
+    } catch (e) {
+      console.warn('[Careers] existing settings read notice:', e);
+    }
 
-          old = "  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),\n  saveCareers: (items: CareerOpportunity[]) => {\n    setStored('careers', items);\n    // Careers are stored in the dedicated careers table as the primary source of truth.\n    // Keep website_settings as a backward-compatible mirror for older deployments.\n    saveWebsiteSetting('careers', items);\n  },"
+    const byId = new Map<string, CareerOpportunity>();
+    for (const job of existing) if (job?.id) byId.set(job.id, job);
+    for (const job of incoming) if (job?.id) byId.set(job.id, job);
+    const merged = Array.from(byId.values());
+
+    setStored('careers', merged);
+    await saveWebsiteSetting('careers', merged);
+
+    // Also persist the normalized records to the dedicated careers table.
+    if (supabase && merged.length) {
+      try {
+        const rows = merged.map((job: any) => ({
+          id: job.id,
+          title: job.title || '',
+          type: job.type || 'job',
+          department: job.department || 'General',
+          location: job.location || '',
+          description: job.description || '',
+          requirements: Array.isArray(job.requirements) ? job.requirements : [],
+          responsibilities: Array.isArray(job.responsibilities) ? job.responsibilities : (Array.isArray(job.benefits) ? job.benefits : []),
+          experience: job.experience || '',
+          is_active: job.active !== false,
+          active: job.active !== false,
+          isActive: job.active !== false
+        }));
+        const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
+        if (error) console.warn('[Careers] dedicated table upsert notice:', error.message);
+      } catch (e) {
+        console.warn('[Careers] dedicated table sync notice:', e);
+      }
+    }
+    return merged;
+  },"""
           new = """  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
   saveCareers: (items: CareerOpportunity[]) => {
     setStored('careers', items);
     if (!supabase || !isSupabaseConfigured) return;
 
     // Careers use the dedicated table as the single source of truth.
-    // Map the UI fields to the actual careers table schema.
+    // Save the exact current list so deleting a job also deletes it remotely.
     void (async () => {
       try {
         const rows = (Array.isArray(items) ? items : []).map((item: CareerOpportunity, index: number) => ({
@@ -60,6 +105,7 @@ jobs:
           const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
           if (error) throw error;
         }
+        await saveWebsiteSetting('careers', Array.isArray(items) ? items : []);
       } catch (error) {
         console.error('[Careers Persistence] Failed saving careers:', error);
       }
@@ -67,8 +113,7 @@ jobs:
   },"""
           if old not in s:
               raise SystemExit('saveCareers block not found')
-          s = s.replace(old, new, 1)
-          p.write_text(s)
+          p.write_text(s.replace(old, new, 1))
           PY
           git diff --check
       - name: Commit patched source
@@ -78,5 +123,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/db.ts .github/workflows/apply-careers-fix.yml .github/workflows/apply-careers-single-source.yml
           git diff --cached --quiet && exit 0
-          git commit -m "Fix Careers persistence using dedicated table"
+          git commit -m "Fix Careers deletion persistence"
           git push
