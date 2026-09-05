@@ -18,48 +18,55 @@ jobs:
           import re
           p = Path('src/lib/db.ts')
           s = p.read_text()
-          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getJobApplications:)"
+          pattern = r"  getCareers: \(\): CareerOpportunity\[\] => getStored\('careers', DEFAULT_CAREERS\),\n  saveCareers: .*?\n  },(?=\n\s*getApplications:)"
           replacement = '''  getCareers: (): CareerOpportunity[] => getStored('careers', DEFAULT_CAREERS),
-  saveCareers: (items: CareerOpportunity[]) => {
-    setStored('careers', items);
+  saveCareers: async (items: CareerOpportunity[]) => {
+    // The Admin Panel passes the complete current careers list. Treat it as the source of truth
+    // so deleted jobs are removed from every persistent store instead of being merged back in.
+    const careers = Array.isArray(items) ? items : [];
+    setStored('careers', careers);
+
     if (!supabase || !isSupabaseConfigured) return;
 
-    void (async () => {
-      try {
-        const rows = (Array.isArray(items) ? items : []).map((item: CareerOpportunity, index: number) => ({
-          id: item.id,
-          title: item.title || '',
-          department: item.department || 'General',
-          location: item.location || 'Bahawalpur, Pakistan',
-          type: item.type || 'job',
-          experience: (item as any).experience || '',
-          description: item.description || '',
-          requirements: Array.isArray(item.requirements) ? item.requirements : [],
-          responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : (Array.isArray(item.benefits) ? item.benefits : []),
-          benefits: Array.isArray(item.benefits) ? item.benefits : [],
-          is_active: item.active !== false,
-          active: item.active !== false,
-          isActive: item.active !== false,
-          displayOrder: (item as any).displayOrder ?? index + 1,
-          updated_at: new Date().toISOString()
-        }));
+    try {
+      // Keep both legacy settings mirrors in exact sync with the Admin Panel list.
+      // saveWebsiteSetting writes to website_settings and site_settings.
+      await saveWebsiteSetting('careers', careers);
 
-        const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
-        if (existingErr) throw existingErr;
-        const incomingIds = new Set(rows.map(r => r.id));
-        const removedIds = (existing || []).map((r: any) => r.id).filter((id: string) => !incomingIds.has(id));
-        if (removedIds.length) {
-          const { error } = await supabase.from('careers').delete().in('id', removedIds);
-          if (error) throw error;
-        }
-        if (rows.length) {
-          const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
-          if (error) throw error;
-        }
-      } catch (error) {
-        console.error('[Careers Persistence] Failed saving careers:', error);
+      // Synchronize the dedicated careers table and explicitly delete rows removed in the UI.
+      const rows = careers.map((item: CareerOpportunity, index: number) => ({
+        id: item.id,
+        title: item.title || '',
+        department: item.department || 'General',
+        location: item.location || 'Bahawalpur, Pakistan',
+        type: item.type || 'job',
+        experience: (item as any).experience || '',
+        description: item.description || '',
+        requirements: Array.isArray(item.requirements) ? item.requirements : [],
+        responsibilities: Array.isArray(item.responsibilities) ? item.responsibilities : (Array.isArray(item.benefits) ? item.benefits : []),
+        benefits: Array.isArray(item.benefits) ? item.benefits : [],
+        is_active: item.active !== false,
+        active: item.active !== false,
+        isActive: item.active !== false,
+        displayOrder: (item as any).displayOrder ?? index + 1,
+        updated_at: new Date().toISOString()
+      }));
+
+      const { data: existing, error: existingErr } = await supabase.from('careers').select('id');
+      if (existingErr) throw existingErr;
+      const incomingIds = new Set(rows.map(r => r.id));
+      const removedIds = (existing || []).map((r: any) => r.id).filter((id: string) => !incomingIds.has(id));
+      if (removedIds.length) {
+        const { error } = await supabase.from('careers').delete().in('id', removedIds);
+        if (error) throw error;
       }
-    })();
+      if (rows.length) {
+        const { error } = await supabase.from('careers').upsert(rows, { onConflict: 'id' });
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error('[Careers Persistence] Failed saving careers:', error);
+    }
   },'''
           ns, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
           if n != 1:
