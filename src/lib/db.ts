@@ -71,10 +71,6 @@ const persistApplicationList = async (items: JobApplication[]) => {
 
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return applications;
 
-  // Careers are stored in site_settings, not public.careers. Therefore the
-  // frontend job id is not a public.careers UUID and must never be sent to the
-  // job_applications.job_id foreign key. Keep the human-readable job_title so
-  // the admin panel still shows exactly which position was applied for.
   const rows = applications.map((item: any) => ({
     id: typeof item.id === 'string' && item.id.trim() ? item.id : crypto.randomUUID(),
     job_id: null,
@@ -83,7 +79,9 @@ const persistApplicationList = async (items: JobApplication[]) => {
     email: item.email || item.applicantEmail || '',
     phone: item.phone || '',
     cover_note: item.coverLetter || item.cover_note || '',
-    resume_url: item.resumeUrl || item.resume_url || '',
+    // Never send a full resume data URL into the database. A 5MB file becomes
+    // roughly 6.7MB of text and can make the application insert fail.
+    resume_url: typeof item.resumeUrl === 'string' && item.resumeUrl.startsWith('data:') ? '' : (item.resumeUrl || item.resume_url || ''),
     status: item.status || 'New',
     created_at: item.appliedAt || new Date().toISOString()
   })).filter((row: any) => row.id && row.applicant_name && row.email);
@@ -91,10 +89,6 @@ const persistApplicationList = async (items: JobApplication[]) => {
   if (!rows.length) return applications;
 
   try {
-    // Public Careers submissions only have INSERT permission. A normal
-    // upsert also requires UPDATE permission and can therefore silently fail
-    // for anonymous visitors. Use INSERT + ignoreDuplicates for public users;
-    // authenticated admins retain full upsert behavior for edits/status changes.
     const { data: sessionData } = await legacy.supabase.auth.getSession();
     const isAuthenticated = Boolean(sessionData?.session?.user);
 
@@ -169,8 +163,6 @@ const wrappedSyncAllFromSupabase = async () => {
       localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
     } catch (error) {
       console.error('[Applications] Direct Supabase sync failed:', error);
-      // Keep the last known local applications if the admin read is temporarily
-      // blocked by an RLS/session issue instead of replacing them with [].
       const cachedApplications = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
       if (cachedApplications.length > 0) data.applications = cachedApplications;
     }
