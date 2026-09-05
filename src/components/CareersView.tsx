@@ -5,7 +5,7 @@ import { CareerOpportunity, JobApplication } from '../types';
 
 interface CareersViewProps {
   opportunities: CareerOpportunity[];
-  onAddApplication: (app: JobApplication) => void;
+  onAddApplication: (app: JobApplication) => void | Promise<void> | Promise<void>;
 }
 
 export default function CareersView({ opportunities, onAddApplication }: CareersViewProps) {
@@ -91,7 +91,7 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
     setResumeBase64('');
   };
 
-  const handleFormSubmit = (e: FormEvent) => {
+  const handleFormSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!fullName || !email || !phone || !resumeBase64) {
       setFormError('Please fill out all required fields and upload your resume.');
@@ -110,9 +110,15 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
       appliedAt: new Date().toISOString()
     };
 
-    onAddApplication(newApp);
-    setFormSubmitted(true);
-    setFormError('');
+    try {
+      await onAddApplication(newApp);
+      setFormSubmitted(true);
+      setFormError('');
+    } catch (error) {
+      console.error('[Careers] Application submission failed:', error);
+      setFormError('Unable to submit your application right now. Please try again.');
+      return;
+    }
   };
 
   return (

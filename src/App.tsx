@@ -446,9 +446,9 @@ export default function App() {
     }
   };
 
-  const handleSaveApplications = (data: JobApplication[]) => {
+  const handleSaveApplications = async (data: JobApplication[]) => {
+    await dbStore.saveApplications(data);
     setApplications(data);
-    dbStore.saveApplications(data);
   };
 
   const handleSaveMessages = (data: ContactMessage[]) => {
