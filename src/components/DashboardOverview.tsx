@@ -212,14 +212,11 @@ export default function DashboardOverview({
     ? liveMetrics.rawTeam 
     : (Array.isArray(team) ? team : []);
 
-  const safeCareers = Array.isArray(liveMetrics?.rawCareers) 
-    ? liveMetrics.rawCareers 
-    : (Array.isArray(careers) ? careers : []);
+  // Careers and applications must follow the authoritative App state.
+  // Dashboard analytics cache must never resurrect deleted records.
+  const safeCareers = Array.isArray(careers) ? careers : [];
 
-  const safeApplications =
-    Array.isArray(liveMetrics?.rawJobApplications) && liveMetrics.rawJobApplications.length > 0
-      ? liveMetrics.rawJobApplications
-      : (Array.isArray(applications) ? applications : []);
+  const safeApplications = Array.isArray(applications) ? applications : [];
 
   const safeMessages = Array.isArray(liveMetrics?.rawContactMessages) 
     ? liveMetrics.rawContactMessages 
@@ -235,8 +232,8 @@ export default function DashboardOverview({
   const totalHeroSlides = typeof liveMetrics?.totalHeroSlides === 'number' ? liveMetrics.totalHeroSlides : safeHeroSlides.length;
   const totalGalleryImages = typeof liveMetrics?.totalGalleryImages === 'number' ? liveMetrics.totalGalleryImages : safeGallery.length;
   const totalTeamMembers = typeof liveMetrics?.totalTeamMembers === 'number' ? liveMetrics.totalTeamMembers : safeTeam.length;
-  const totalCareers = typeof liveMetrics?.totalCareers === 'number' ? liveMetrics.totalCareers : safeCareers.length;
-  const totalJobApplications = typeof liveMetrics?.totalJobApplications === 'number' ? liveMetrics.totalJobApplications : safeApplications.length;
+  const totalCareers = safeCareers.length;
+  const totalJobApplications = safeApplications.length;
   const totalContactMessages = typeof liveMetrics?.totalContactMessages === 'number' ? liveMetrics.totalContactMessages : safeMessages.length;
   const totalReviews = typeof liveMetrics?.totalReviews === 'number' ? liveMetrics.totalReviews : safeReviews.length;
 
