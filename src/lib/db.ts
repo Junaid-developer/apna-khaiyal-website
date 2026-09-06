@@ -34,7 +34,7 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   } catch (error) { console.error('[Careers] Durable persistence failed:', error); throw error; }
 };
 
-const isUuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$/i.test(value);
+const isUuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 const toApplicationRow = (item: JobApplication) => {
   const application: any = item || {};
@@ -50,9 +50,6 @@ const persistResumeToStorage = async (resumeUrl: string, applicationId: string):
   const encoded = match[3] || '';
   let blob: Blob;
   try {
-    // Use the browser's native data-URL decoder instead of a JavaScript byte-by-byte
-    // atob/Uint8Array loop. Large resumes can otherwise block the main thread long
-    // enough to make the first submit click appear unresponsive.
     blob = await fetch(resumeUrl).then(response => {
       if (!response.ok) throw new Error('Unable to decode the uploaded resume.');
       return response.blob();
@@ -86,7 +83,7 @@ let activeApplicationWrite: Promise<JobApplication> | null = null;
 const persistApplication = (item: JobApplication): Promise<JobApplication> => {
   if (activeApplicationWrite) return activeApplicationWrite;
 
-  activeApplicationWrite = (async () => {
+  const write = (async () => {
     const application: any = item || {};
     if (!application.fullName && !application.applicantName) throw new Error('Applicant name is required.');
     if (!application.email && !application.applicantEmail) throw new Error('Applicant email is required.');
@@ -94,10 +91,6 @@ const persistApplication = (item: JobApplication): Promise<JobApplication> => {
     const row = toApplicationRow(application);
     row.resume_url = await persistResumeToStorage(row.resume_url, row.id);
 
-    // Public applicants only have INSERT permission on job_applications. Using
-    // upsert here incorrectly requires UPDATE/SELECT permissions and caused the
-    // generic submission error. Every public submission already has a UUID, so
-    // a plain INSERT is the correct operation.
     const { error } = await legacy.supabase.from('job_applications').insert(row);
     if (error) throw error;
 
@@ -107,11 +100,13 @@ const persistApplication = (item: JobApplication): Promise<JobApplication> => {
     return cachedApplication;
   })();
 
-  activeApplicationWrite.finally(() => {
-    activeApplicationWrite = null;
-  });
+  activeApplicationWrite = write;
+  write.then(
+    () => { if (activeApplicationWrite === write) activeApplicationWrite = null; },
+    () => { if (activeApplicationWrite === write) activeApplicationWrite = null; }
+  );
 
-  return activeApplicationWrite;
+  return write;
 };
 
 const deleteApplications = async (ids: string[]) => {
