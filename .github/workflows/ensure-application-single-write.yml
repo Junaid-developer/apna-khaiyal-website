@@ -20,11 +20,11 @@ jobs:
           s = p.read_text()
           pattern = r"\s*const handleAddApplication = async \(newApp: JobApplication\) => \{.*?\n\s*\};"
           replacement = '''
-  // Append each application to the existing React state after the single durable DB insert.
-  // Never replace the complete application array with only the newest submission.
+  // Persist exactly one public application, then append the persisted record to UI state.
+  // Do not replace the full application collection and do not perform a second write.
   const handleAddApplication = async (newApp: JobApplication) => {
-    await dbStore.saveApplications([newApp]);
-    setApplications(prev => [newApp, ...prev]);
+    const savedApp = await dbStore.addApplication(newApp);
+    setApplications(prev => [savedApp, ...prev.filter(existing => existing.id !== savedApp.id)]);
   };'''
           s2, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
           if count != 1:
