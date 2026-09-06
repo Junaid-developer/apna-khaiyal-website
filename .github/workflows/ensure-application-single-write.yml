@@ -48,8 +48,12 @@ jobs:
           if count != 1:
               raise SystemExit('Could not locate handleSaveApplications')
 
-          old_sync = """          // Never wipe locally loaded applications when Supabase returns an empty/temporary response.\n          if (normApps.length > 0) {\n            setApplications(normApps);\n          }"""
-          new_sync = """          // Supabase is authoritative for applications. An empty result means all applications were deleted.\n          setApplications(normApps);"""
+          old_sync = """          // Never wipe locally loaded applications when Supabase returns an empty/temporary response.
+          if (normApps.length > 0) {
+            setApplications(normApps);
+          }"""
+          new_sync = """          // Supabase is authoritative for applications. An empty result means all applications were deleted.
+          setApplications(normApps);"""
           if old_sync in s:
               s = s.replace(old_sync, new_sync, 1)
 
