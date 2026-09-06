@@ -89,7 +89,19 @@ const persistApplication = (item: JobApplication): Promise<JobApplication> => {
     row.resume_url = await persistResumeToStorage(row.resume_url, row.id);
 
     const { error } = await legacy.supabase.from('job_applications').insert(row);
-    if (error) throw error;
+    if (error) {
+      if (error.code === '23505') {
+        const { data: existing, error: lookupError } = await legacy.supabase
+          .from('job_applications')
+          .select('*')
+          .eq('email', row.email)
+          .eq('created_at', row.created_at)
+          .maybeSingle();
+        if (lookupError || !existing) throw error;
+        return { ...(application as JobApplication), id: existing.id, resumeUrl: existing.resume_url || row.resume_url };
+      }
+      throw error;
+    }
 
     const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: row.resume_url };
     const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
@@ -149,7 +161,7 @@ export const syncAllFromSupabase = wrappedSyncAllFromSupabase;
 export const dbStore = {
   ...legacy.dbStore,
   getCareers: () => legacy.isSupabaseConfigured ? readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY) : legacy.dbStore.getCareers(),
-  getApplications: () => legacy.isSupabaseConfigured ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY) : legacy.dbStore.getApplications(),
+  getApplications: () => legacy.isSupabaseConfigured ? [] : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
   deleteApplications,
   addApplication: async (item: JobApplication) => persistApplication(item),
@@ -159,9 +171,6 @@ export const dbStore = {
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
 
     if (legacy.supabase && legacy.isSupabaseConfigured) {
-      // Public Careers submission passes the client-side app_... id. It is an
-      // append operation, not an authoritative replacement of the application list.
-      // Never interpret a non-UUID incoming id as "delete every live row".
       const hasNonUuidApplication = list.some(item => !isUuid(item.id));
       if (hasNonUuidApplication) {
         for (const item of list.filter(item => !isUuid(item.id))) {
@@ -170,11 +179,16 @@ export const dbStore = {
         return list;
       }
 
-      // This method is authoritative only for the currently rendered admin list:
-      // it may delete rows that are missing from that list, but it must NEVER
-      // recreate a UUID row that is missing from Supabase. New applications use
-      // addApplication/persistApplication, so stale admin state cannot resurrect
-      // an application that was already deleted.
+      if (list.length === 1 && isUuid(list[0].id)) {
+        const { data: existingRow, error: lookupError } = await legacy.supabase
+          .from('job_applications')
+          .select('id')
+          .eq('id', list[0].id)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        if (!existingRow) return [await persistApplication(list[0])];
+      }
+
       const { data: liveRows, error: liveError } = await legacy.supabase.from('job_applications').select('id');
       if (liveError) throw liveError;
       const liveIds = (liveRows || []).map((row: any) => row.id).filter(isUuid);
