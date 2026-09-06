@@ -1,4 +1,4 @@
-name: Ensure Application Single Write
+name: Ensure Application Persistence
 on:
   push:
     branches: [main]
@@ -7,33 +7,31 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'fix: application single write'
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'fix: application persistence'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch application flow
+      - name: Fix application add/delete state flow
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
 
-          # App: persist exactly one application and render the persisted record.
           p = Path('src/App.tsx')
           s = p.read_text()
-          pattern = r"\s*const handleAddApplication = async \(newApp: JobApplication\) => \{.*?\n\s*\};"
-          replacement = '''
+
+          add_pattern = r"\s*const handleAddApplication = async \(newApp: JobApplication\) => \{.*?\n\s*\};"
+          add_replacement = '''
   const handleAddApplication = async (newApp: JobApplication) => {
     const savedApp = await dbStore.addApplication(newApp);
     setApplications(prev => [savedApp, ...prev.filter(existing => existing.id !== savedApp.id)]);
   };'''
-          s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          s, count = re.subn(add_pattern, add_replacement, s, count=1, flags=re.S)
           if count != 1:
               raise SystemExit('Could not locate handleAddApplication')
 
-          # App: only the explicit admin list operation may delete rows.
-          # A newly submitted public application must never be treated as a full-list replacement.
-          pattern = r"\s*const handleSaveApplications = async \(data: JobApplication\[\]\) => \{.*?\n\s*\};"
-          replacement = '''
+          save_pattern = r"\s*const handleSaveApplications = async \(data: JobApplication\[\]\) => \{.*?\n\s*\};"
+          save_replacement = '''
   const handleSaveApplications = async (data: JobApplication[]) => {
     const nextIds = new Set(data.map(item => item?.id).filter(Boolean));
     const removedIds = applications
@@ -46,41 +44,15 @@ jobs:
 
     setApplications(data);
   };'''
-          s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          s, count = re.subn(save_pattern, save_replacement, s, count=1, flags=re.S)
           if count != 1:
               raise SystemExit('Could not locate handleSaveApplications')
-          p.write_text(s)
 
-          # Types: retain the original File so submit does not decode base64.
-          p = Path('src/types.ts')
-          s = p.read_text()
-          if 'resumeFile?: File;' not in s:
-              s = s.replace('  resumeUrl: string;\n', '  resumeUrl: string;\n  resumeFile?: File;\n', 1)
-          p.write_text(s)
+          old_sync = """          // Never wipe locally loaded applications when Supabase returns an empty/temporary response.\n          if (normApps.length > 0) {\n            setApplications(normApps);\n          }"""
+          new_sync = """          // Supabase is authoritative for applications. An empty result means all applications were deleted.\n          setApplications(normApps);"""
+          if old_sync in s:
+              s = s.replace(old_sync, new_sync, 1)
 
-          # Careers: immediate synchronous ref lock prevents rapid clicks before React rerenders.
-          p = Path('src/components/CareersView.tsx')
-          s = p.read_text()
-          if 'const submitLockRef = useRef(false);' not in s:
-              s = s.replace("  const fileInputRef = useRef<HTMLInputElement>(null);", "  const fileInputRef = useRef<HTMLInputElement>(null);\n  const submitLockRef = useRef(false);")
-          s = s.replace("    setIsSubmitting(false);\n    setFormError('');", "    setIsSubmitting(false);\n    submitLockRef.current = false;\n    setFormError('');", 1)
-          s = s.replace("    // Prevent double/triple clicks while the database + resume upload is in progress.\n    // Without this guard, every click creates a new UUID and therefore a new DB row.\n    if (isSubmitting) return;", "    // Lock synchronously BEFORE any await/state update. React state alone can be\n    // stale for several rapid clicks in the same event loop.\n    if (submitLockRef.current) return;\n    submitLockRef.current = true;\n    if (isSubmitting) return;")
-          s = s.replace("    } finally {\n      setIsSubmitting(false);\n    }", "    } finally {\n      setIsSubmitting(false);\n      submitLockRef.current = false;\n    }")
-          s = s.replace("    const reader = new FileReader();\n    reader.onload = (e) => {\n      if (e.target?.result) {\n        setResumeBase64(e.target.result as string);\n        setResumeName(file.name);\n        setFormError('');\n      }\n    };\n    reader.readAsDataURL(file);", "    setResumeFile(file);\n    setResumeBase64(file.name);\n    setResumeName(file.name);\n    setFormError('');")
-          if 'const [resumeFile, setResumeFile]' not in s:
-              s = s.replace("  const [resumeBase64, setResumeBase64] = useState('');", "  const [resumeBase64, setResumeBase64] = useState('');\n  const [resumeFile, setResumeFile] = useState<File | null>(null);")
-          s = s.replace("    setResumeBase64('');\n  };\n\n  const handleFormSubmit", "    setResumeBase64('');\n    setResumeFile(null);\n  };\n\n  const handleFormSubmit", 1)
-          s = s.replace("      resumeUrl: resumeBase64, // Storing base64 as mock url; db layer uploads it to Storage.", "      resumeUrl: resumeBase64,\n      resumeFile: resumeFile || undefined,")
-          p.write_text(s)
-
-          # DB: upload the original File directly to Storage.
-          p = Path('src/lib/db.ts')
-          s = p.read_text()
-          old = "const persistResumeToStorage = async (resumeUrl: string, applicationId: string): Promise<string> => {\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;"
-          new = "const persistResumeToStorage = async (resumeUrl: string, applicationId: string, resumeFile?: File): Promise<string> => {\n  if (resumeFile instanceof File) {\n    if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');\n    const extension = resumeFile.name.toLowerCase().endsWith('.docx') ? 'docx' : resumeFile.name.toLowerCase().endsWith('.doc') ? 'doc' : 'pdf';\n    const filePath = `applications/${applicationId}.${extension}`;\n    const contentType = resumeFile.type || 'application/octet-stream';\n    const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, resumeFile, { cacheControl: '3600', contentType, upsert: false });\n    if (error || !data) throw new Error(error?.message || 'Unable to upload resume. Please try again.');\n    const { data: publicUrlData } = legacy.supabase.storage.from('documents').getPublicUrl(filePath);\n    const publicUrl = publicUrlData?.publicUrl;\n    if (!publicUrl) throw new Error('Resume uploaded but its public URL could not be created.');\n    return publicUrl;\n  }\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;"
-          if old in s:
-              s = s.replace(old, new, 1)
-          s = s.replace("  row.resume_url = await persistResumeToStorage(row.resume_url, row.id);", "  row.resume_url = await persistResumeToStorage(row.resume_url, row.id, application.resumeFile);")
           p.write_text(s)
           PY
           git diff --check
@@ -88,10 +60,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/App.tsx src/types.ts src/components/CareersView.tsx src/lib/db.ts
+          git add src/App.tsx
           git diff --cached --quiet && exit 0
-          git commit -m 'fix: application single write'
+          git commit -m 'fix: application persistence'
           git push
-
-# Triggered to ensure the single-submit patch is applied on the current main branch.
-# The admin save path above is intentionally deletion-only for IDs actually removed from the rendered list.
