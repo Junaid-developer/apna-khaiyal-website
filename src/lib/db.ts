@@ -5,6 +5,14 @@ import type { CareerOpportunity, JobApplication } from '../types';
 
 export * from './db_legacy';
 
+export const getAvatarUrl = (avatar: string | null | undefined): string => {
+  if (!avatar) return '';
+  if (avatar.startsWith('data:') || avatar.startsWith('http://') || avatar.startsWith('https://')) {
+    return avatar;
+  }
+  return avatar;
+};
+
 const CAREERS_CACHE_KEY = 'apnakhaiyal_careers';
 const APPLICATIONS_CACHE_KEY = 'apnakhaiyal_applications';
 
