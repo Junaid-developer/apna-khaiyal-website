@@ -283,36 +283,3 @@ export interface PermissionDefinition {
   can_write: boolean;
   can_delete: boolean;
 }
-
-// Synchronous browser-side lock for the Careers application submit button.
-// This closes the race where several physical clicks happen before React flushes
-// the isSubmitting state update. It is intentionally scoped to this button only.
-if (typeof document !== 'undefined') {
-  document.addEventListener('click', (event) => {
-    const target = event.target as HTMLElement | null;
-    const button = target?.closest('#submit-job-app-btn') as HTMLButtonElement | null;
-    if (!button) return;
-
-    if (button.dataset.applicationSubmitLocked === '1') {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      return;
-    }
-
-    button.dataset.applicationSubmitLocked = '1';
-
-    const release = () => {
-      if (!button.isConnected) return;
-      if (!button.disabled) {
-        delete button.dataset.applicationSubmitLocked;
-      }
-    };
-
-    const observer = new MutationObserver(release);
-    observer.observe(button, { attributes: true, attributeFilter: ['disabled'] });
-    window.setTimeout(() => {
-      observer.disconnect();
-      release();
-    }, 5000);
-  }, true);
-}
