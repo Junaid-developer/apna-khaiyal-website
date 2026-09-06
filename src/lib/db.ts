@@ -50,10 +50,13 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   }
 };
 
-const persistApplication = async (item: JobApplication) => {
+const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+const toApplicationRow = (item: JobApplication, preserveId = true) => {
   const application: any = item || {};
-  const databaseId = crypto.randomUUID();
-  const row = {
+  const databaseId = preserveId && isUuid(application.id) ? application.id : crypto.randomUUID();
+  return {
     id: databaseId,
     job_id: application.jobId || null,
     job_title: application.jobTitle || 'General Application',
@@ -66,15 +69,20 @@ const persistApplication = async (item: JobApplication) => {
     status: application.status || 'New',
     created_at: application.appliedAt || new Date().toISOString(),
   };
+};
+
+const persistApplication = async (item: JobApplication) => {
+  const application: any = item || {};
+  const row = toApplicationRow(application, true);
 
   if (!row.applicant_name || !row.email) throw new Error('Applicant name and email are required.');
   if (!legacy.supabase || !legacy.isSupabaseConfigured) {
     throw new Error('Supabase is not configured in the deployed website.');
   }
 
-  const { error } = await legacy.supabase.from('job_applications').insert(row);
+  const { error } = await legacy.supabase.from('job_applications').upsert(row, { onConflict: 'id' });
   if (error) {
-    console.error('[Applications] Supabase insert failed:', {
+    console.error('[Applications] Supabase upsert failed:', {
       message: error.message,
       code: error.code,
       details: error.details,
@@ -83,9 +91,9 @@ const persistApplication = async (item: JobApplication) => {
     throw error;
   }
 
-  const cachedApplication: JobApplication = { ...(application as JobApplication), id: databaseId, resumeUrl: '' };
+  const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: '' };
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  const merged = [cachedApplication, ...cached.filter(existing => existing.id !== databaseId)];
+  const merged = [cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)];
   try {
     localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(merged));
   } catch (cacheError) {
@@ -130,6 +138,26 @@ const wrappedSyncAllFromSupabase = async () => {
 
     if (hasAuthenticatedSession) {
       try {
+        // Repair any application that exists in this browser's old local cache
+        // but was never durably written because of the earlier persistence bug.
+        // This is append-only: nothing is deleted from Supabase here.
+        const remoteBeforeRepair = await legacy.supabase
+          .from('job_applications')
+          .select('id');
+        const remoteIdsBeforeRepair = new Set((remoteBeforeRepair.data || []).map((row: any) => row.id));
+        const cachedOnlyApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIdsBeforeRepair.has(item.id));
+
+        for (const cachedApplication of cachedOnlyApplications) {
+          const repairRow = toApplicationRow(cachedApplication, true);
+          if (!repairRow.applicant_name || !repairRow.email) continue;
+          const { error: repairError } = await legacy.supabase
+            .from('job_applications')
+            .upsert(repairRow, { onConflict: 'id' });
+          if (repairError) {
+            console.warn('[Applications] Cached application repair skipped:', repairError.message);
+          }
+        }
+
         const { data: applicationRows, error: applicationError } = await legacy.supabase
           .from('job_applications')
           .select('*')
@@ -150,10 +178,8 @@ const wrappedSyncAllFromSupabase = async () => {
           appliedAt: item.created_at || '',
         })).filter((item: JobApplication) => item.id);
 
-        const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
-        const pendingLocalApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIds.has(item.id));
-        data.applications = [...pendingLocalApplications, ...remoteApplications];
-        try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications)); } catch {}
+        data.applications = remoteApplications;
+        try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(remoteApplications)); } catch {}
       } catch (error) {
         console.error('[Applications] Direct Supabase sync failed:', error);
         if (cachedApplicationsBeforeSync.length > 0) data.applications = cachedApplicationsBeforeSync;
@@ -176,9 +202,15 @@ export const dbStore = {
   getApplications: () => legacy.isSupabaseConfigured ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY) : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
   saveApplications: async (items: JobApplication[]) => {
-    const list = Array.isArray(items) ? items : [];
+    const list = Array.isArray(items) ? items.filter(Boolean) : [];
     if (!list.length) return [];
-    await persistApplication(list[list.length - 1]);
-    return list;
+
+    // Persist every supplied application by stable id. This keeps the API
+    // append-safe even if an admin component passes its complete list.
+    const saved: JobApplication[] = [];
+    for (const item of list) {
+      saved.push(await persistApplication(item));
+    }
+    return saved;
   },
 };
