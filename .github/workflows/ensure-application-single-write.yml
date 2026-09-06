@@ -30,8 +30,8 @@ jobs:
           if count != 1:
               raise SystemExit('Could not locate handleAddApplication')
 
-          # App: deletions must be based on the actual rendered application list,
-          # not the potentially stale localStorage cache inside saveApplications.
+          # App: only the explicit admin list operation may delete rows.
+          # A newly submitted public application must never be treated as a full-list replacement.
           pattern = r"\s*const handleSaveApplications = async \(data: JobApplication\[\]\) => \{.*?\n\s*\};"
           replacement = '''
   const handleSaveApplications = async (data: JobApplication[]) => {
@@ -94,3 +94,4 @@ jobs:
           git push
 
 # Triggered to ensure the single-submit patch is applied on the current main branch.
+# The admin save path above is intentionally deletion-only for IDs actually removed from the rendered list.
