@@ -75,9 +75,6 @@ const persistResumeToStorage = async (resumeUrl: string, applicationId: string):
   return publicUrl;
 };
 
-// Module-level idempotency lock: even if React receives several rapid submit
-events before its state rerenders, only the first application write is allowed
-to reach Storage/Supabase. Concurrent callers share the same in-flight result.
 let activeApplicationWrite: Promise<JobApplication> | null = null;
 
 const persistApplication = (item: JobApplication): Promise<JobApplication> => {
@@ -158,27 +155,34 @@ export const dbStore = {
   saveApplications: async (items: JobApplication[]) => {
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
     const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-    if (list.length === 1 && isUuid(list[0].id) && !cached.some(existing => existing.id === list[0].id)) return [await persistApplication(list[0])];
-
-    // For admin deletions, compare against the live Supabase table instead of
-    // relying on localStorage. This prevents stale/missing cache entries from
-    // making submitted applications impossible to delete.
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
+
     if (legacy.supabase && legacy.isSupabaseConfigured) {
       const { data: liveRows, error: liveError } = await legacy.supabase.from('job_applications').select('id');
       if (liveError) throw liveError;
       const liveIds = (liveRows || []).map((row: any) => row.id).filter(isUuid);
       const removedIds = liveIds.filter(id => !incomingIds.has(id));
       if (removedIds.length) await deleteApplications(removedIds);
-    } else {
-      const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
-      const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
-      if (removedIds.length) await deleteApplications(removedIds);
+
+      // Admin application-list saves are not new submissions. Never re-insert
+      // rows that already exist in Supabase; doing so caused deletion attempts
+      // to fail on duplicate primary keys before the UI could finish the save.
+      if (list.length) {
+        const newItems = list.filter(item => isUuid(item.id) && !liveIds.includes(item.id));
+        if (newItems.length) {
+          const saved: JobApplication[] = [];
+          for (const item of newItems) saved.push(await persistApplication(item));
+          return saved.length ? list : list;
+        }
+      }
+
+      try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(list)); } catch {}
+      return list;
     }
 
-    if (!list.length) return [];
-    const saved: JobApplication[] = [];
-    for (const item of list) saved.push(await persistApplication(item));
-    return saved;
+    const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
+    const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
+    if (removedIds.length) await deleteApplications(removedIds);
+    return list;
   },
 };
