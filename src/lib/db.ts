@@ -159,6 +159,17 @@ export const dbStore = {
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
 
     if (legacy.supabase && legacy.isSupabaseConfigured) {
+      // Public Careers submission passes the client-side app_... id. It is an
+      // append operation, not an authoritative replacement of the application list.
+      // Never interpret a non-UUID incoming id as "delete every live row".
+      const hasNonUuidApplication = list.some(item => !isUuid(item.id));
+      if (hasNonUuidApplication) {
+        for (const item of list.filter(item => !isUuid(item.id))) {
+          await persistApplication(item);
+        }
+        return list;
+      }
+
       const { data: liveRows, error: liveError } = await legacy.supabase.from('job_applications').select('id');
       if (liveError) throw liveError;
       const liveIds = (liveRows || []).map((row: any) => row.id).filter(isUuid);
