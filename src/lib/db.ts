@@ -17,16 +17,8 @@ const readLocalList = <T>(key: string): T[] => {
 
 const normalizeCareer = (job: any, index: number): CareerOpportunity => ({
   id: typeof job?.id === 'string' && job.id.trim() ? job.id : crypto.randomUUID(),
-  title: job?.title || '',
-  type: job?.type || 'job',
-  department: job?.department || 'General',
-  location: job?.location || '',
-  description: job?.description || '',
-  requirements: Array.isArray(job?.requirements) ? job.requirements : [],
-  responsibilities: Array.isArray(job?.responsibilities) ? job.responsibilities : [],
-  benefits: Array.isArray(job?.benefits) ? job.benefits : [],
-  experience: job?.experience || '',
-  active: job?.active ?? job?.is_active ?? job?.isActive ?? true,
+  title: job?.title || '', type: job?.type || 'job', department: job?.department || 'General', location: job?.location || '',
+  description: job?.description || '', requirements: Array.isArray(job?.requirements) ? job.requirements : [], responsibilities: Array.isArray(job?.responsibilities) ? job.responsibilities : [], benefits: Array.isArray(job?.benefits) ? job.benefits : [], experience: job?.experience || '', active: job?.active ?? job?.is_active ?? job?.isActive ?? true,
   displayOrder: Number.isFinite(job?.displayOrder) ? job.displayOrder : Number.isFinite(job?.display_order) ? job.display_order : index,
 });
 
@@ -44,81 +36,36 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
     const verified = (data as any).value.map((job: any, index: number) => normalizeCareer(job, index));
     localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(verified));
     return verified;
-  } catch (error) {
-    console.error('[Careers] Durable persistence failed:', error);
-    throw error;
-  }
+  } catch (error) { console.error('[Careers] Durable persistence failed:', error); throw error; }
 };
 
-const isUuid = (value: unknown): value is string =>
-  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$/i.test(value);
+const isUuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$/i.test(value);
 
 const toApplicationRow = (item: JobApplication) => {
   const application: any = item || {};
-  return {
-    id: isUuid(application.id) ? application.id : crypto.randomUUID(),
-    job_id: application.jobId || null,
-    job_title: application.jobTitle || 'General Application',
-    applicant_name: application.fullName || application.applicantName || '',
-    email: application.email || application.applicantEmail || '',
-    phone: application.phone || '',
-    experience: application.experience || '',
-    cover_note: application.coverLetter || application.cover_note || '',
-    resume_url: application.resumeUrl || application.resume_url || '',
-    status: application.status || 'New',
-    created_at: application.appliedAt || new Date().toISOString(),
-  };
+  return { id: isUuid(application.id) ? application.id : crypto.randomUUID(), job_id: application.jobId || null, job_title: application.jobTitle || 'General Application', applicant_name: application.fullName || application.applicantName || '', email: application.email || application.applicantEmail || '', phone: application.phone || '', experience: application.experience || '', cover_note: application.coverLetter || application.cover_note || '', resume_url: application.resumeUrl || application.resume_url || '', status: application.status || 'New', created_at: application.appliedAt || new Date().toISOString() };
 };
 
-/** Upload the resume data URL to Storage and store only its public URL in Postgres. */
 const persistResumeToStorage = async (resumeUrl: string, applicationId: string): Promise<string> => {
   if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;
-  if (!legacy.supabase || !legacy.isSupabaseConfigured) {
-    throw new Error('Supabase is not configured.');
-  }
-
+  if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');
   const match = resumeUrl.match(/^data:([^;,]+)(;base64)?,(.*)$/s);
   if (!match) throw new Error('Invalid resume file data. Please upload the resume again.');
-
   const contentType = match[1] || 'application/octet-stream';
   const encoded = match[3] || '';
   let blob: Blob;
-
   try {
     if (match[2]) {
-      const binary = atob(encoded);
-      const bytes = new Uint8Array(binary.length);
+      const binary = atob(encoded); const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       blob = new Blob([bytes], { type: contentType });
-    } else {
-      blob = new Blob([decodeURIComponent(encoded)], { type: contentType });
-    }
-  } catch {
-    throw new Error('Unable to read the uploaded resume. Please select the file again.');
-  }
-
-  const extensionByType: Record<string, string> = {
-    'application/pdf': 'pdf',
-    'application/msword': 'doc',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-  };
+    } else blob = new Blob([decodeURIComponent(encoded)], { type: contentType });
+  } catch { throw new Error('Unable to read the uploaded resume. Please select the file again.'); }
+  const extensionByType: Record<string, string> = { 'application/pdf': 'pdf', 'application/msword': 'doc', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx' };
   const extension = extensionByType[contentType] || 'bin';
   const filePath = `applications/${applicationId}.${extension}`;
-
-  // Each application gets a unique UUID path, so upsert is unnecessary.
-  // Using upsert=true requires SELECT/UPDATE Storage permissions and can cause
-  // otherwise-valid public submissions to fail. A plain INSERT only needs INSERT.
-  const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, blob, {
-    cacheControl: '3600',
-    contentType,
-    upsert: false,
-  });
-
-  if (error || !data) {
-    console.error('[Applications] Resume storage upload failed:', error);
-    throw new Error(error?.message || 'Unable to upload resume. Please try again.');
-  }
-
+  const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, blob, { cacheControl: '3600', contentType, upsert: false });
+  if (error || !data) { console.error('[Applications] Resume storage upload failed:', error); throw new Error(error?.message || 'Unable to upload resume. Please try again.'); }
   const { data: publicUrlData } = legacy.supabase.storage.from('documents').getPublicUrl(filePath);
   const publicUrl = publicUrlData?.publicUrl;
   if (!publicUrl) throw new Error('Resume uploaded but its public URL could not be created.');
@@ -130,106 +77,47 @@ const persistApplication = async (item: JobApplication) => {
   if (!application.fullName && !application.applicantName) throw new Error('Applicant name is required.');
   if (!application.email && !application.applicantEmail) throw new Error('Applicant email is required.');
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured in the deployed website.');
-
   const row = toApplicationRow(application);
   row.resume_url = await persistResumeToStorage(row.resume_url, row.id);
-
   const { error } = await legacy.supabase.from('job_applications').upsert(row, { onConflict: 'id' });
   if (error) throw error;
-
   const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: row.resume_url };
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  const merged = [cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)];
-  try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(merged)); } catch {}
+  try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify([cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)])); } catch {}
   return cachedApplication;
 };
 
 const deleteApplications = async (ids: string[]) => {
   const uniqueIds = Array.from(new Set(ids.filter(isUuid)));
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');
-
-  if (uniqueIds.length) {
-    const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds);
-    if (error) throw error;
-  }
-
+  if (uniqueIds.length) { const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds); if (error) throw error; }
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  try {
-    localStorage.setItem(
-      APPLICATIONS_CACHE_KEY,
-      JSON.stringify(uniqueIds.length ? cached.filter(item => !uniqueIds.includes(item.id)) : [])
-    );
-  } catch {}
+  try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(uniqueIds.length ? cached.filter(item => !uniqueIds.includes(item.id)) : [])); } catch {}
 };
 
 const readCareerSettings = async () => {
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return null;
-  try {
-    const { data, error } = await legacy.supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle();
-    if (error) return null;
-    return data && Array.isArray((data as any).value) ? (data as any).value : null;
-  } catch { return null; }
+  try { const { data, error } = await legacy.supabase.from('site_settings').select('value').eq('key', 'careers').maybeSingle(); if (error) return null; return data && Array.isArray((data as any).value) ? (data as any).value : null; } catch { return null; }
 };
 
 const wrappedSyncAllFromSupabase = async () => {
   let hasAuthenticatedSession = false;
-  if (legacy.supabase && legacy.isSupabaseConfigured) {
-    try {
-      const { data: { session } } = await legacy.supabase.auth.getSession();
-      hasAuthenticatedSession = Boolean(session?.user);
-    } catch { hasAuthenticatedSession = false; }
-  }
-
+  if (legacy.supabase && legacy.isSupabaseConfigured) { try { const { data: { session } } = await legacy.supabase.auth.getSession(); hasAuthenticatedSession = Boolean(session?.user); } catch { hasAuthenticatedSession = false; } }
   const data = await legacy.syncAllFromSupabase(hasAuthenticatedSession ? 'Admin' : 'Public');
   if (!data) return data;
-
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     const savedCareers = await readCareerSettings();
-    if (savedCareers) {
-      data.careers = savedCareers.map((item: any, index: number) => normalizeCareer(item, index));
-      try { localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers)); } catch {}
-    }
-
+    if (savedCareers) { data.careers = savedCareers.map((item: any, index: number) => normalizeCareer(item, index)); try { localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers)); } catch {} }
     if (hasAuthenticatedSession) {
       try {
-        const { data: applicationRows, error: applicationError } = await legacy.supabase
-          .from('job_applications')
-          .select('*')
-          .order('created_at', { ascending: false });
+        const { data: applicationRows, error: applicationError } = await legacy.supabase.from('job_applications').select('*').order('created_at', { ascending: false });
         if (applicationError) throw applicationError;
-
         const seen = new Set<string>();
-        const remoteApplications = (applicationRows || []).map((item: any) => ({
-          id: item.id || '',
-          jobId: item.job_id || '',
-          jobTitle: item.job_title || 'General Application',
-          fullName: item.applicant_name || '',
-          email: item.email || '',
-          phone: item.phone || '',
-          experience: item.experience || '',
-          coverLetter: item.cover_note || '',
-          resumeUrl: item.resume_url || '',
-          status: item.status || 'New',
-          appliedAt: item.created_at || '',
-        })).filter((item: JobApplication) => {
-          if (!item.id || seen.has(item.id)) return false;
-          seen.add(item.id);
-          return true;
-        });
-
-        data.applications = remoteApplications;
-        try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(remoteApplications)); } catch {}
-      } catch (error) {
-        console.error('[Applications] Direct Supabase sync failed:', error);
-        data.applications = [];
-      }
-    } else {
-      data.applications = [];
-    }
-  } else {
-    data.applications = [];
-  }
-
+        data.applications = (applicationRows || []).map((item: any) => ({ id: item.id || '', jobId: item.job_id || '', jobTitle: item.job_title || 'General Application', fullName: item.applicant_name || '', email: item.email || '', phone: item.phone || '', experience: item.experience || '', coverLetter: item.cover_note || '', resumeUrl: item.resume_url || '', status: item.status || 'New', appliedAt: item.created_at || '' })).filter((item: JobApplication) => { if (!item.id || seen.has(item.id)) return false; seen.add(item.id); return true; });
+        try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications)); } catch {}
+      } catch (error) { console.error('[Applications] Direct Supabase sync failed:', error); data.applications = []; }
+    } else data.applications = [];
+  } else data.applications = [];
   return data;
 };
 
@@ -241,17 +129,21 @@ export const dbStore = {
   getApplications: () => legacy.isSupabaseConfigured ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY) : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
   deleteApplications,
+  // Public career submissions use this method so saving one new application
+  // can never interpret the one-item list as a full replacement of the DB.
+  addApplication: async (item: JobApplication) => persistApplication(item),
   saveApplications: async (items: JobApplication[]) => {
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
     const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
+    // A single new UUID is the public "append" operation. Do not delete cached records.
+    if (list.length === 1 && isUuid(list[0].id) && !cached.some(existing => existing.id === list[0].id)) {
+      return [await persistApplication(list[0])];
+    }
     const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
-
     const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
     if (removedIds.length) await deleteApplications(removedIds);
-
     if (!list.length) return [];
-
     const saved: JobApplication[] = [];
     for (const item of list) saved.push(await persistApplication(item));
     return saved;
