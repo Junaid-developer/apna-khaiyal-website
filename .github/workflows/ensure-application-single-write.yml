@@ -29,6 +29,26 @@ jobs:
           s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
           if count != 1:
               raise SystemExit('Could not locate handleAddApplication')
+
+          # App: deletions must be based on the actual rendered application list,
+          # not the potentially stale localStorage cache inside saveApplications.
+          pattern = r"\s*const handleSaveApplications = async \(data: JobApplication\[\]\) => \{.*?\n\s*\};"
+          replacement = '''
+  const handleSaveApplications = async (data: JobApplication[]) => {
+    const nextIds = new Set(data.map(item => item?.id).filter(Boolean));
+    const removedIds = applications
+      .map(item => item?.id)
+      .filter((id): id is string => Boolean(id) && !nextIds.has(id));
+
+    if (removedIds.length) {
+      await dbStore.deleteApplications(removedIds);
+    }
+
+    setApplications(data);
+  };'''
+          s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('Could not locate handleSaveApplications')
           p.write_text(s)
 
           # Types: retain the original File so submit does not decode base64.
@@ -46,7 +66,6 @@ jobs:
           s = s.replace("    setIsSubmitting(false);\n    setFormError('');", "    setIsSubmitting(false);\n    submitLockRef.current = false;\n    setFormError('');", 1)
           s = s.replace("    // Prevent double/triple clicks while the database + resume upload is in progress.\n    // Without this guard, every click creates a new UUID and therefore a new DB row.\n    if (isSubmitting) return;", "    // Lock synchronously BEFORE any await/state update. React state alone can be\n    // stale for several rapid clicks in the same event loop.\n    if (submitLockRef.current) return;\n    submitLockRef.current = true;\n    if (isSubmitting) return;")
           s = s.replace("    } finally {\n      setIsSubmitting(false);\n    }", "    } finally {\n      setIsSubmitting(false);\n      submitLockRef.current = false;\n    }")
-          # Stop submit-time base64 conversion; keep the original File.
           s = s.replace("    const reader = new FileReader();\n    reader.onload = (e) => {\n      if (e.target?.result) {\n        setResumeBase64(e.target.result as string);\n        setResumeName(file.name);\n        setFormError('');\n      }\n    };\n    reader.readAsDataURL(file);", "    setResumeFile(file);\n    setResumeBase64(file.name);\n    setResumeName(file.name);\n    setFormError('');")
           if 'const [resumeFile, setResumeFile]' not in s:
               s = s.replace("  const [resumeBase64, setResumeBase64] = useState('');", "  const [resumeBase64, setResumeBase64] = useState('');\n  const [resumeFile, setResumeFile] = useState<File | null>(null);")
