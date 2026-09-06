@@ -70,13 +70,7 @@ const toApplicationRow = (item: JobApplication) => {
   };
 };
 
-/**
- * CareersView currently gives us a data URL for the uploaded resume.
- * Do not put that large base64 payload into job_applications. Upload the
- * actual file to the existing public `documents` Storage bucket and keep
- * only the resulting URL in Postgres. This prevents larger resumes from
- * making the REST request fail after smaller applications have succeeded.
- */
+/** Upload the resume data URL to Storage and store only its public URL in Postgres. */
 const persistResumeToStorage = async (resumeUrl: string, applicationId: string): Promise<string> => {
   if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;
   if (!legacy.supabase || !legacy.isSupabaseConfigured) {
@@ -111,10 +105,13 @@ const persistResumeToStorage = async (resumeUrl: string, applicationId: string):
   const extension = extensionByType[contentType] || 'bin';
   const filePath = `applications/${applicationId}.${extension}`;
 
+  // Each application gets a unique UUID path, so upsert is unnecessary.
+  // Using upsert=true requires SELECT/UPDATE Storage permissions and can cause
+  // otherwise-valid public submissions to fail. A plain INSERT only needs INSERT.
   const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, blob, {
     cacheControl: '3600',
     contentType,
-    upsert: true,
+    upsert: false,
   });
 
   if (error || !data) {
