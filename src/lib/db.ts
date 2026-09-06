@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import * as legacy from './db_legacy';
 import type { CareerOpportunity, JobApplication } from '../types';
 
@@ -51,16 +50,8 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
   }
 };
 
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
-const publicApplicationClient = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } })
-  : null;
-
 const persistApplication = async (item: JobApplication) => {
   const application: any = item || {};
-  // job_applications.id is UUID in Postgres. Always generate a fresh UUID for
-  // the database row instead of trusting a UI/local identifier.
   const databaseId = crypto.randomUUID();
   const row = {
     id: databaseId,
@@ -69,6 +60,7 @@ const persistApplication = async (item: JobApplication) => {
     applicant_name: application.fullName || application.applicantName || '',
     email: application.email || application.applicantEmail || '',
     phone: application.phone || '',
+    experience: application.experience || '',
     cover_note: application.coverLetter || application.cover_note || '',
     resume_url: typeof application.resumeUrl === 'string' && application.resumeUrl.startsWith('data:') ? '' : application.resumeUrl || application.resume_url || '',
     status: application.status || 'New',
@@ -76,13 +68,21 @@ const persistApplication = async (item: JobApplication) => {
   };
 
   if (!row.applicant_name || !row.email) throw new Error('Applicant name and email are required.');
+  if (!legacy.supabase || !legacy.isSupabaseConfigured) {
+    throw new Error('Supabase is not configured in the deployed website.');
+  }
 
-  if (publicApplicationClient) {
-    const { error } = await publicApplicationClient.from('job_applications').insert(row);
-    if (error) {
-      console.error('[Applications] Supabase persistence failed:', error);
-      throw error;
-    }
+  // Use the exact same Supabase client that the rest of the app uses.
+  // This avoids a second client being created from a different/stale set of Vercel env vars.
+  const { error } = await legacy.supabase.from('job_applications').insert(row);
+  if (error) {
+    console.error('[Applications] Supabase insert failed:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw error;
   }
 
   const cachedApplication: JobApplication = { ...(application as JobApplication), id: databaseId, resumeUrl: '' };
