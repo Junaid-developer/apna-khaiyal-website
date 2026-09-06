@@ -1,34 +1,11 @@
-import { createClient } from '@Supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import * as legacy from './db_legacy';
 import type { CareerOpportunity, JobApplication } from '../types';
 
+// Re-export the legacy data layer, including its existing getAvatarUrl helper.
+// Do not define a second helper here: the legacy export already supports
+// getAvatarUrl(gender, name), which is used by TeamView and App.
 export * from './db_legacy';
-
-// Keep the public helper compatible with the existing TeamView/App callers.
-// The legacy implementation expects (gender, name), while older code may pass
-// a direct avatar URL. Supporting both avoids breaking either call pattern.
-export const getAvatarUrl = (
-  genderOrAvatar?: string | null,
-  name?: string
-): string => {
-  if (name === undefined) {
-    const avatar = genderOrAvatar;
-    if (!avatar) return '';
-    if (avatar.startsWith('data:') || avatar.startsWith('http://') || avatar.startsWith('https://')) {
-      return avatar;
-    }
-    return avatar;
-  }
-
-  const seed = encodeURIComponent((name && name.trim()) || 'User');
-  const isFemale = String(genderOrAvatar || '').toLowerCase() === 'female';
-
-  if (isFemale) {
-    return `https://api.dicebear.com/9.x/personas/svg?seed=${seed}&hair=long,bobCut,curly,bobBangs,straightBun,extraLong&backgroundColor=f5d76e`;
-  }
-
-  return `https://api.dicebear.com/9.x/personas/svg?seed=${seed}&hair=shortCombover,buzzcut,fade,shortComboverChops&backgroundColor=d4af37`;
-};
 
 const CAREERS_CACHE_KEY = 'apnakhaiyal_careers';
 const APPLICATIONS_CACHE_KEY = 'apnakhaiyal_applications';
@@ -138,11 +115,11 @@ const readCareerSettings = async () => {
       console.error('[Careers] Supabase load failed:', error);
       return null;
     }
-    if (data && Array.isArray((data as any).value)) return (data as any).value;
+    return data && Array.isArray((data as any).value) ? (data as any).value : null;
   } catch (error) {
     console.error('[Careers] Careers read failed:', error);
+    return null;
   }
-  return null;
 };
 
 const wrappedSyncAllFromSupabase = async () => {
@@ -169,24 +146,14 @@ const wrappedSyncAllFromSupabase = async () => {
       if (applicationError) throw applicationError;
 
       const remoteApplications = (applicationRows || []).map((item: any) => ({
-        id: item.id || '',
-        jobId: item.job_id || '',
-        jobTitle: item.job_title || 'General Application',
-        fullName: item.applicant_name || '',
-        email: item.email || '',
-        phone: item.phone || '',
-        experience: item.experience || '',
-        coverLetter: item.cover_note || '',
-        resumeUrl: item.resume_url || '',
-        status: item.status || 'New',
-        appliedAt: item.created_at || '',
+        id: item.id || '', jobId: item.job_id || '', jobTitle: item.job_title || 'General Application',
+        fullName: item.applicant_name || '', email: item.email || '', phone: item.phone || '',
+        experience: item.experience || '', coverLetter: item.cover_note || '', resumeUrl: item.resume_url || '',
+        status: item.status || 'New', appliedAt: item.created_at || '',
       })).filter((item: JobApplication) => item.id);
 
       const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
-      const pendingLocalApplications = cachedApplicationsBeforeSync.filter(
-        (item: JobApplication) => item.id && !remoteIds.has(item.id)
-      );
-
+      const pendingLocalApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIds.has(item.id));
       data.applications = [...pendingLocalApplications, ...remoteApplications];
       localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
     } catch (error) {
@@ -208,17 +175,9 @@ export const syncAllFromSupabase = wrappedSyncAllFromSupabase;
 
 export const dbStore = {
   ...legacy.dbStore,
-
-  getCareers: () => legacy.isSupabaseConfigured
-    ? readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY)
-    : legacy.dbStore.getCareers(),
-
-  getApplications: () => legacy.isSupabaseConfigured
-    ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY)
-    : legacy.dbStore.getApplications(),
-
+  getCareers: () => legacy.isSupabaseConfigured ? readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY) : legacy.dbStore.getCareers(),
+  getApplications: () => legacy.isSupabaseConfigured ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY) : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
-
   saveApplications: async (items: JobApplication[]) => {
     const list = Array.isArray(items) ? items : [];
     if (!list.length) return [];
