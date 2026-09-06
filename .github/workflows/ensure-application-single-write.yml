@@ -11,32 +11,57 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch App handler
+      - name: Patch application flow
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
+
+          # 1) App: always perform exactly one durable application write.
           p = Path('src/App.tsx')
           s = p.read_text()
           pattern = r"\s*const handleAddApplication = async \(newApp: JobApplication\) => \{.*?\n\s*\};"
           replacement = '''
   // Persist exactly one public application, then append the persisted record to UI state.
-  // Do not replace the full application collection and do not perform a second write.
   const handleAddApplication = async (newApp: JobApplication) => {
     const savedApp = await dbStore.addApplication(newApp);
     setApplications(prev => [savedApp, ...prev.filter(existing => existing.id !== savedApp.id)]);
   };'''
-          s2, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
           if count != 1:
               raise SystemExit('Could not locate handleAddApplication')
-          p.write_text(s2)
+          p.write_text(s)
+
+          # 2) Types: keep the actual File separately from the UI/display URL.
+          p = Path('src/types.ts')
+          s = p.read_text()
+          if 'resumeFile?: File;' not in s:
+              s = s.replace('  resumeUrl: string;\n', '  resumeUrl: string;\n  resumeFile?: File;\n', 1)
+          p.write_text(s)
+
+          # 3) Careers UI: retain the selected File and do not convert it to base64.
+          p = Path('src/components/CareersView.tsx')
+          s = p.read_text()
+          s = s.replace("  const [resumeBase64, setResumeBase64] = useState('');\n", "  const [resumeBase64, setResumeBase64] = useState('');\n  const [resumeFile, setResumeFile] = useState<File | null>(null);\n", 1)
+          s = s.replace("    const reader = new FileReader();\n    reader.onload = (e) => {\n      if (e.target?.result) {\n        setResumeBase64(e.target.result as string);\n        setResumeName(file.name);\n        setFormError('');\n      }\n    };\n    reader.readAsDataURL(file);", "    setResumeFile(file);\n    setResumeBase64(file.name);\n    setResumeName(file.name);\n    setFormError('');", 1)
+          s = s.replace("    setResumeBase64('');\n  };\n\n  const handleFormSubmit", "    setResumeBase64('');\n    setResumeFile(null);\n  };\n\n  const handleFormSubmit", 1)
+          s = s.replace("      resumeUrl: resumeBase64, // Storing base64 as mock url; db layer uploads it to Storage.\n", "      resumeUrl: resumeBase64,\n      resumeFile: resumeFile || undefined,\n", 1)
+          p.write_text(s)
+
+          # 4) DB: upload the original File directly. This removes the large base64
+          # conversion from the submit click and keeps the existing Storage/database flow.
+          p = Path('src/lib/db.ts')
+          s = p.read_text()
+          s = s.replace("const persistResumeToStorage = async (resumeUrl: string, applicationId: string): Promise<string> => {\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;", "const persistResumeToStorage = async (resumeUrl: string, applicationId: string, resumeFile?: File): Promise<string> => {\n  if (resumeFile instanceof File) {\n    if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');\n    const extension = resumeFile.name.toLowerCase().endsWith('.docx') ? 'docx' : resumeFile.name.toLowerCase().endsWith('.doc') ? 'doc' : 'pdf';\n    const filePath = `applications/${applicationId}.${extension}`;\n    const contentType = resumeFile.type || 'application/octet-stream';\n    const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, resumeFile, { cacheControl: '3600', contentType, upsert: false });\n    if (error || !data) { console.error('[Applications] Resume storage upload failed:', error); throw new Error(error?.message || 'Unable to upload resume. Please try again.'); }\n    const { data: publicUrlData } = legacy.supabase.storage.from('documents').getPublicUrl(filePath);\n    const publicUrl = publicUrlData?.publicUrl;\n    if (!publicUrl) throw new Error('Resume uploaded but its public URL could not be created.');\n    return publicUrl;\n  }\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;", 1)
+          s = s.replace("  row.resume_url = await persistResumeToStorage(row.resume_url, row.id);", "  row.resume_url = await persistResumeToStorage(row.resume_url, row.id, application.resumeFile);", 1)
+          p.write_text(s)
           PY
           git diff --check
       - name: Commit
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/App.tsx
+          git add src/App.tsx src/types.ts src/components/CareersView.tsx src/lib/db.ts
           git diff --cached --quiet && exit 0
           git commit -m 'fix: application single write'
           git push
