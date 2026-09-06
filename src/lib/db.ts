@@ -64,19 +64,78 @@ const toApplicationRow = (item: JobApplication) => {
     phone: application.phone || '',
     experience: application.experience || '',
     cover_note: application.coverLetter || application.cover_note || '',
-    // Resume data is intentionally preserved. CareersView supplies the uploaded
-    // file as a data URL; stripping it here made the admin resume link disappear.
     resume_url: application.resumeUrl || application.resume_url || '',
     status: application.status || 'New',
     created_at: application.appliedAt || new Date().toISOString(),
   };
 };
 
+/**
+ * CareersView currently gives us a data URL for the uploaded resume.
+ * Do not put that large base64 payload into job_applications. Upload the
+ * actual file to the existing public `documents` Storage bucket and keep
+ * only the resulting URL in Postgres. This prevents larger resumes from
+ * making the REST request fail after smaller applications have succeeded.
+ */
+const persistResumeToStorage = async (resumeUrl: string, applicationId: string): Promise<string> => {
+  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;
+  if (!legacy.supabase || !legacy.isSupabaseConfigured) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const match = resumeUrl.match(/^data:([^;,]+)(;base64)?,(.*)$/s);
+  if (!match) throw new Error('Invalid resume file data. Please upload the resume again.');
+
+  const contentType = match[1] || 'application/octet-stream';
+  const encoded = match[3] || '';
+  let blob: Blob;
+
+  try {
+    if (match[2]) {
+      const binary = atob(encoded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      blob = new Blob([bytes], { type: contentType });
+    } else {
+      blob = new Blob([decodeURIComponent(encoded)], { type: contentType });
+    }
+  } catch {
+    throw new Error('Unable to read the uploaded resume. Please select the file again.');
+  }
+
+  const extensionByType: Record<string, string> = {
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  };
+  const extension = extensionByType[contentType] || 'bin';
+  const filePath = `applications/${applicationId}.${extension}`;
+
+  const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, blob, {
+    cacheControl: '3600',
+    contentType,
+    upsert: true,
+  });
+
+  if (error || !data) {
+    console.error('[Applications] Resume storage upload failed:', error);
+    throw new Error(error?.message || 'Unable to upload resume. Please try again.');
+  }
+
+  const { data: publicUrlData } = legacy.supabase.storage.from('documents').getPublicUrl(filePath);
+  const publicUrl = publicUrlData?.publicUrl;
+  if (!publicUrl) throw new Error('Resume uploaded but its public URL could not be created.');
+  return publicUrl;
+};
+
 const persistApplication = async (item: JobApplication) => {
   const application: any = item || {};
-  const row = toApplicationRow(application);
-  if (!row.applicant_name || !row.email) throw new Error('Applicant name and email are required.');
+  if (!application.fullName && !application.applicantName) throw new Error('Applicant name is required.');
+  if (!application.email && !application.applicantEmail) throw new Error('Applicant email is required.');
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured in the deployed website.');
+
+  const row = toApplicationRow(application);
+  row.resume_url = await persistResumeToStorage(row.resume_url, row.id);
 
   const { error } = await legacy.supabase.from('job_applications').upsert(row, { onConflict: 'id' });
   if (error) throw error;
@@ -134,8 +193,6 @@ const wrappedSyncAllFromSupabase = async () => {
       try { localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers)); } catch {}
     }
 
-    // Supabase is the source of truth for applications. Never repair or
-    // re-insert records from localStorage during refresh.
     if (hasAuthenticatedSession) {
       try {
         const { data: applicationRows, error: applicationError } = await legacy.supabase
@@ -170,7 +227,6 @@ const wrappedSyncAllFromSupabase = async () => {
         data.applications = [];
       }
     } else {
-      // Applications are admin-only. Do not expose stale local application data publicly.
       data.applications = [];
     }
   } else {
@@ -194,9 +250,6 @@ export const dbStore = {
     const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
 
-    // Admin deletion passes the remaining list. Reconcile against the cached
-    // UUIDs, including the empty-list case, so deleting the final application
-    // really removes it from Supabase instead of letting it return on refresh.
     const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
     if (removedIds.length) await deleteApplications(removedIds);
 
