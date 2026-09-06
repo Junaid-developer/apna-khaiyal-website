@@ -1,34 +1,45 @@
-const APPLICATION_SUBMIT_BUTTON = '#submit-job-app-btn';
+const APPLICATION_FORM = '#job-application-modal form';
+const APPLICATION_BUTTON = '#submit-job-app-btn';
 
 if (typeof document !== 'undefined') {
-  document.addEventListener('click', (event) => {
-    const target = event.target as HTMLElement | null;
-    const button = target?.closest(APPLICATION_SUBMIT_BUTTON) as HTMLButtonElement | null;
-    if (!button) return;
+  // Capture the form submit itself. This runs synchronously before React's
+  // submit handler can start another async request, so rapid clicks can never
+  // create multiple application requests.
+  document.addEventListener('submit', (event) => {
+    const form = event.target as HTMLFormElement | null;
+    if (!form?.matches(APPLICATION_FORM)) return;
 
-    if (button.dataset.applicationSubmitLocked === '1') {
+    if (form.dataset.applicationSubmitLocked === '1') {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
     }
 
-    // Lock synchronously during the first click. React state updates happen after
-    // the event, so an isSubmitting state check alone cannot stop rapid clicks.
-    button.dataset.applicationSubmitLocked = '1';
+    form.dataset.applicationSubmitLocked = '1';
 
+    const button = form.querySelector(APPLICATION_BUTTON) as HTMLButtonElement | null;
     const release = () => {
-      if (!button.isConnected) return;
-      if (!button.disabled) delete button.dataset.applicationSubmitLocked;
+      if (!form.isConnected) return;
+      if (button && !button.disabled) delete form.dataset.applicationSubmitLocked;
     };
 
+    // React sets disabled=true while the async save is running and false when
+    // it finishes. Release only then; never use a short timeout.
     const observer = new MutationObserver(release);
-    observer.observe(button, { attributes: true, attributeFilter: ['disabled'] });
+    if (button) observer.observe(button, { attributes: true, attributeFilter: ['disabled'] });
 
-    // Safety release if validation prevents the button from entering submitting state.
-    window.setTimeout(() => {
-      observer.disconnect();
+    const watcher = window.setInterval(() => {
+      if (!form.isConnected) {
+        window.clearInterval(watcher);
+        observer.disconnect();
+        return;
+      }
       release();
-    }, 5000);
+      if (form.dataset.applicationSubmitLocked !== '1') {
+        window.clearInterval(watcher);
+        observer.disconnect();
+      }
+    }, 100);
   }, true);
 }
 
