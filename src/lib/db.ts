@@ -170,18 +170,16 @@ export const dbStore = {
         return list;
       }
 
+      // This method is authoritative only for the currently rendered admin list:
+      // it may delete rows that are missing from that list, but it must NEVER
+      // recreate a UUID row that is missing from Supabase. New applications use
+      // addApplication/persistApplication, so stale admin state cannot resurrect
+      // an application that was already deleted.
       const { data: liveRows, error: liveError } = await legacy.supabase.from('job_applications').select('id');
       if (liveError) throw liveError;
       const liveIds = (liveRows || []).map((row: any) => row.id).filter(isUuid);
       const removedIds = liveIds.filter(id => !incomingIds.has(id));
       if (removedIds.length) await deleteApplications(removedIds);
-
-      if (list.length) {
-        const newItems = list.filter(item => isUuid(item.id) && !liveIds.includes(item.id));
-        if (newItems.length) {
-          for (const item of newItems) await persistApplication(item);
-        }
-      }
 
       try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(list)); } catch {}
       return list;
