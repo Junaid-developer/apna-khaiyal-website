@@ -78,25 +78,40 @@ const persistResumeToStorage = async (resumeUrl: string, applicationId: string):
   return publicUrl;
 };
 
-const persistApplication = async (item: JobApplication) => {
-  const application: any = item || {};
-  if (!application.fullName && !application.applicantName) throw new Error('Applicant name is required.');
-  if (!application.email && !application.applicantEmail) throw new Error('Applicant email is required.');
-  if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured in the deployed website.');
-  const row = toApplicationRow(application);
-  row.resume_url = await persistResumeToStorage(row.resume_url, row.id);
+// Module-level idempotency lock: even if React receives several rapid submit
+// events before its state rerenders, only the first application write is allowed
+// to reach Storage/Supabase. Concurrent callers share the same in-flight result.
+let activeApplicationWrite: Promise<JobApplication> | null = null;
 
-  // Public applicants only have INSERT permission on job_applications. Using
-  // upsert here incorrectly requires UPDATE/SELECT permissions and caused the
-  // generic submission error. Every public submission already has a UUID, so
-  // a plain INSERT is the correct operation.
-  const { error } = await legacy.supabase.from('job_applications').insert(row);
-  if (error) throw error;
+const persistApplication = (item: JobApplication): Promise<JobApplication> => {
+  if (activeApplicationWrite) return activeApplicationWrite;
 
-  const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: row.resume_url };
-  const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify([cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)])); } catch {}
-  return cachedApplication;
+  activeApplicationWrite = (async () => {
+    const application: any = item || {};
+    if (!application.fullName && !application.applicantName) throw new Error('Applicant name is required.');
+    if (!application.email && !application.applicantEmail) throw new Error('Applicant email is required.');
+    if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured in the deployed website.');
+    const row = toApplicationRow(application);
+    row.resume_url = await persistResumeToStorage(row.resume_url, row.id);
+
+    // Public applicants only have INSERT permission on job_applications. Using
+    // upsert here incorrectly requires UPDATE/SELECT permissions and caused the
+    // generic submission error. Every public submission already has a UUID, so
+    // a plain INSERT is the correct operation.
+    const { error } = await legacy.supabase.from('job_applications').insert(row);
+    if (error) throw error;
+
+    const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: row.resume_url };
+    const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
+    try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify([cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)])); } catch {}
+    return cachedApplication;
+  })();
+
+  activeApplicationWrite.finally(() => {
+    activeApplicationWrite = null;
+  });
+
+  return activeApplicationWrite;
 };
 
 const deleteApplications = async (ids: string[]) => {
