@@ -15,13 +15,21 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('src/App.tsx')
-          s=p.read_text()
-          old="""  const handleAddApplication = (newApp: JobApplication) => {\n    const updated = [newApp, ...applications];\n    handleSaveApplications(updated);\n  };"""
-          new="""  const handleAddApplication = async (newApp: JobApplication) => {\n    await dbStore.saveApplications([newApp]);\n    setApplications(prev => [newApp, ...prev]);\n  };"""
-          if old not in s:
-              raise SystemExit('Application handler already patched or pattern missing')
-          p.write_text(s.replace(old,new,1))
+          import re
+          p = Path('src/App.tsx')
+          s = p.read_text()
+          pattern = r"\s*const handleAddApplication = async \(newApp: JobApplication\) => \{.*?\n\s*\};"
+          replacement = '''
+  // Append each application to the existing React state after the single durable DB insert.
+  // Never replace the complete application array with only the newest submission.
+  const handleAddApplication = async (newApp: JobApplication) => {
+    await dbStore.saveApplications([newApp]);
+    setApplications(prev => [newApp, ...prev]);
+  };'''
+          s2, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('Could not locate handleAddApplication')
+          p.write_text(s2)
           PY
           git diff --check
       - name: Commit
@@ -29,5 +37,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/App.tsx
+          git diff --cached --quiet && exit 0
           git commit -m 'fix: application single write'
           git push
