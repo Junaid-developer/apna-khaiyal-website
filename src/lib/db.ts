@@ -53,11 +53,10 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
 const isUuid = (value: unknown): value is string =>
   typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$/i.test(value);
 
-const toApplicationRow = (item: JobApplication, preserveId = true) => {
+const toApplicationRow = (item: JobApplication) => {
   const application: any = item || {};
-  const databaseId = preserveId && isUuid(application.id) ? application.id : crypto.randomUUID();
   return {
-    id: databaseId,
+    id: isUuid(application.id) ? application.id : crypto.randomUUID(),
     job_id: application.jobId || null,
     job_title: application.jobTitle || 'General Application',
     applicant_name: application.fullName || application.applicantName || '',
@@ -73,32 +72,17 @@ const toApplicationRow = (item: JobApplication, preserveId = true) => {
 
 const persistApplication = async (item: JobApplication) => {
   const application: any = item || {};
-  const row = toApplicationRow(application, true);
-
+  const row = toApplicationRow(application);
   if (!row.applicant_name || !row.email) throw new Error('Applicant name and email are required.');
-  if (!legacy.supabase || !legacy.isSupabaseConfigured) {
-    throw new Error('Supabase is not configured in the deployed website.');
-  }
+  if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured in the deployed website.');
 
   const { error } = await legacy.supabase.from('job_applications').upsert(row, { onConflict: 'id' });
-  if (error) {
-    console.error('[Applications] Supabase upsert failed:', {
-      message: error.message,
-      code: error.code,
-      details: error.details,
-      hint: error.hint,
-    });
-    throw error;
-  }
+  if (error) throw error;
 
   const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: '' };
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   const merged = [cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)];
-  try {
-    localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(merged));
-  } catch (cacheError) {
-    console.warn('[Applications] Local cache could not be updated; Supabase record is already saved:', cacheError);
-  }
+  try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(merged)); } catch {}
   return cachedApplication;
 };
 
@@ -107,34 +91,11 @@ const deleteApplications = async (ids: string[]) => {
   if (!uniqueIds.length) return;
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');
 
-  // Keep a tombstone for every deleted application so an old browser cache
-  // can never re-create it during the repair/sync step.
-  const { error: tombstoneError } = await legacy.supabase
-    .from('deleted_application_ids')
-    .upsert(uniqueIds.map(id => ({ id, deleted_at: new Date().toISOString() })), { onConflict: 'id' });
-  if (tombstoneError) {
-    console.error('[Applications] Failed to record deleted application IDs:', tombstoneError);
-    throw tombstoneError;
-  }
-
-  const { error } = await legacy.supabase
-    .from('job_applications')
-    .delete()
-    .in('id', uniqueIds);
-  if (error) {
-    console.error('[Applications] Supabase delete failed:', {
-      message: error.message,
-      code: error.code,
-      details: error.details,
-      hint: error.hint,
-    });
-    throw error;
-  }
+  const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds);
+  if (error) throw error;
 
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  try {
-    localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cached.filter(item => !uniqueIds.includes(item.id))));
-  } catch {}
+  try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cached.filter(item => !uniqueIds.includes(item.id)))); } catch {}
 };
 
 const readCareerSettings = async () => {
@@ -147,16 +108,12 @@ const readCareerSettings = async () => {
 };
 
 const wrappedSyncAllFromSupabase = async () => {
-  const cachedApplicationsBeforeSync = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   let hasAuthenticatedSession = false;
-
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     try {
       const { data: { session } } = await legacy.supabase.auth.getSession();
       hasAuthenticatedSession = Boolean(session?.user);
-    } catch {
-      hasAuthenticatedSession = false;
-    }
+    } catch { hasAuthenticatedSession = false; }
   }
 
   const data = await legacy.syncAllFromSupabase(hasAuthenticatedSession ? 'Admin' : 'Public');
@@ -166,34 +123,14 @@ const wrappedSyncAllFromSupabase = async () => {
     const savedCareers = await readCareerSettings();
     if (savedCareers) {
       data.careers = savedCareers.map((item: any, index: number) => normalizeCareer(item, index));
-      localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers));
+      try { localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers)); } catch {}
     }
 
+    // Supabase is the source of truth for applications. Never repair or
+    // re-insert records from localStorage during refresh; that was the cause
+    // of deleted applications returning and duplicate rows being created.
     if (hasAuthenticatedSession) {
       try {
-        // Repair only genuinely unsaved cached applications. Deleted IDs are
-        // tombstoned in deleted_application_ids, and the DB trigger blocks them.
-        const remoteBeforeRepair = await legacy.supabase
-          .from('job_applications')
-          .select('id');
-        const remoteIdsBeforeRepair = new Set((remoteBeforeRepair.data || []).map((row: any) => row.id));
-        const { data: deletedRows } = await legacy.supabase
-          .from('deleted_application_ids')
-          .select('id');
-        const deletedIds = new Set((deletedRows || []).map((row: any) => row.id));
-        const cachedOnlyApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIdsBeforeRepair.has(item.id) && !deletedIds.has(item.id));
-
-        for (const cachedApplication of cachedOnlyApplications) {
-          const repairRow = toApplicationRow(cachedApplication, true);
-          if (!repairRow.applicant_name || !repairRow.email) continue;
-          const { error: repairError } = await legacy.supabase
-            .from('job_applications')
-            .upsert(repairRow, { onConflict: 'id' });
-          if (repairError) {
-            console.warn('[Applications] Cached application repair skipped:', repairError.message);
-          }
-        }
-
         const { data: applicationRows, error: applicationError } = await legacy.supabase
           .from('job_applications')
           .select('*')
@@ -218,13 +155,14 @@ const wrappedSyncAllFromSupabase = async () => {
         try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(remoteApplications)); } catch {}
       } catch (error) {
         console.error('[Applications] Direct Supabase sync failed:', error);
-        if (cachedApplicationsBeforeSync.length > 0) data.applications = cachedApplicationsBeforeSync;
+        data.applications = [];
       }
-    } else if (cachedApplicationsBeforeSync.length > 0) {
-      data.applications = cachedApplicationsBeforeSync;
+    } else {
+      // Applications are admin-only. Do not expose stale local application data publicly.
+      data.applications = [];
     }
-  } else if (cachedApplicationsBeforeSync.length > 0) {
-    data.applications = cachedApplicationsBeforeSync;
+  } else {
+    data.applications = [];
   }
 
   return data;
@@ -243,24 +181,18 @@ export const dbStore = {
     if (!list.length) return [];
 
     const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-    const incomingIds = new Set(list.map(item => item.id).filter(Boolean));
-    const cachedIds = new Set(cached.map(item => item.id).filter(Boolean));
+    const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
+    const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
 
-    // AdminPanel's delete action passes the remaining application list. When
-    // every incoming ID already existed in cache and some cached IDs are gone,
-    // persist those removals instead of allowing the deleted rows to return on refresh.
-    const removedIds = cached
-      .map(item => item.id)
-      .filter((id): id is string => Boolean(id) && cachedIds.has(id) && !incomingIds.has(id));
-    const isReconciliation = removedIds.length > 0 && list.every(item => cachedIds.has(item.id));
-    if (isReconciliation) {
+    // Admin delete currently sends the remaining list. Only reconcile IDs that
+    // are real UUIDs already known in the cache; never generate IDs for old rows.
+    const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
+    if (removedIds.length && list.every(item => !item.id || cachedIds.has(item.id))) {
       await deleteApplications(removedIds);
     }
 
     const saved: JobApplication[] = [];
-    for (const item of list) {
-      saved.push(await persistApplication(item));
-    }
+    for (const item of list) saved.push(await persistApplication(item));
     return saved;
   },
 };
