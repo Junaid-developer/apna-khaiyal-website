@@ -51,7 +51,7 @@ const persistCareerList = async (items: CareerOpportunity[]) => {
 };
 
 const isUuid = (value: unknown): value is string =>
-  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$/i.test(value);
 
 const toApplicationRow = (item: JobApplication, preserveId = true) => {
   const application: any = item || {};
@@ -102,6 +102,41 @@ const persistApplication = async (item: JobApplication) => {
   return cachedApplication;
 };
 
+const deleteApplications = async (ids: string[]) => {
+  const uniqueIds = Array.from(new Set(ids.filter(isUuid)));
+  if (!uniqueIds.length) return;
+  if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');
+
+  // Keep a tombstone for every deleted application so an old browser cache
+  // can never re-create it during the repair/sync step.
+  const { error: tombstoneError } = await legacy.supabase
+    .from('deleted_application_ids')
+    .upsert(uniqueIds.map(id => ({ id, deleted_at: new Date().toISOString() })), { onConflict: 'id' });
+  if (tombstoneError) {
+    console.error('[Applications] Failed to record deleted application IDs:', tombstoneError);
+    throw tombstoneError;
+  }
+
+  const { error } = await legacy.supabase
+    .from('job_applications')
+    .delete()
+    .in('id', uniqueIds);
+  if (error) {
+    console.error('[Applications] Supabase delete failed:', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw error;
+  }
+
+  const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
+  try {
+    localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cached.filter(item => !uniqueIds.includes(item.id))));
+  } catch {}
+};
+
 const readCareerSettings = async () => {
   if (!legacy.supabase || !legacy.isSupabaseConfigured) return null;
   try {
@@ -124,8 +159,6 @@ const wrappedSyncAllFromSupabase = async () => {
     }
   }
 
-  // Public visitors must never query job_applications because applicant data is
-  // intentionally protected by RLS. Authenticated admin sessions can load it.
   const data = await legacy.syncAllFromSupabase(hasAuthenticatedSession ? 'Admin' : 'Public');
   if (!data) return data;
 
@@ -138,14 +171,17 @@ const wrappedSyncAllFromSupabase = async () => {
 
     if (hasAuthenticatedSession) {
       try {
-        // Repair any application that exists in this browser's old local cache
-        // but was never durably written because of the earlier persistence bug.
-        // This is append-only: nothing is deleted from Supabase here.
+        // Repair only genuinely unsaved cached applications. Deleted IDs are
+        // tombstoned in deleted_application_ids, and the DB trigger blocks them.
         const remoteBeforeRepair = await legacy.supabase
           .from('job_applications')
           .select('id');
         const remoteIdsBeforeRepair = new Set((remoteBeforeRepair.data || []).map((row: any) => row.id));
-        const cachedOnlyApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIdsBeforeRepair.has(item.id));
+        const { data: deletedRows } = await legacy.supabase
+          .from('deleted_application_ids')
+          .select('id');
+        const deletedIds = new Set((deletedRows || []).map((row: any) => row.id));
+        const cachedOnlyApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIdsBeforeRepair.has(item.id) && !deletedIds.has(item.id));
 
         for (const cachedApplication of cachedOnlyApplications) {
           const repairRow = toApplicationRow(cachedApplication, true);
@@ -201,12 +237,26 @@ export const dbStore = {
   getCareers: () => legacy.isSupabaseConfigured ? readLocalList<CareerOpportunity>(CAREERS_CACHE_KEY) : legacy.dbStore.getCareers(),
   getApplications: () => legacy.isSupabaseConfigured ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY) : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
+  deleteApplications,
   saveApplications: async (items: JobApplication[]) => {
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
     if (!list.length) return [];
 
-    // Persist every supplied application by stable id. This keeps the API
-    // append-safe even if an admin component passes its complete list.
+    const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
+    const incomingIds = new Set(list.map(item => item.id).filter(Boolean));
+    const cachedIds = new Set(cached.map(item => item.id).filter(Boolean));
+
+    // AdminPanel's delete action passes the remaining application list. When
+    // every incoming ID already existed in cache and some cached IDs are gone,
+    // persist those removals instead of allowing the deleted rows to return on refresh.
+    const removedIds = cached
+      .map(item => item.id)
+      .filter((id): id is string => Boolean(id) && cachedIds.has(id) && !incomingIds.has(id));
+    const isReconciliation = removedIds.length > 0 && list.every(item => cachedIds.has(item.id));
+    if (isReconciliation) {
+      await deleteApplications(removedIds);
+    }
+
     const saved: JobApplication[] = [];
     for (const item of list) {
       saved.push(await persistApplication(item));
