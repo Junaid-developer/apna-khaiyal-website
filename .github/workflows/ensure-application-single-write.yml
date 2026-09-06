@@ -73,3 +73,5 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m 'fix: application single write'
           git push
+
+# Triggered to ensure the single-submit patch is applied on the current main branch.
