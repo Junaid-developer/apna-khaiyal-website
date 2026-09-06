@@ -17,12 +17,11 @@ jobs:
           from pathlib import Path
           import re
 
-          # 1) App: always perform exactly one durable application write.
+          # App: persist exactly one application and render the persisted record.
           p = Path('src/App.tsx')
           s = p.read_text()
           pattern = r"\s*const handleAddApplication = async \(newApp: JobApplication\) => \{.*?\n\s*\};"
           replacement = '''
-  // Persist exactly one public application, then append the persisted record to UI state.
   const handleAddApplication = async (newApp: JobApplication) => {
     const savedApp = await dbStore.addApplication(newApp);
     setApplications(prev => [savedApp, ...prev.filter(existing => existing.id !== savedApp.id)]);
@@ -32,28 +31,37 @@ jobs:
               raise SystemExit('Could not locate handleAddApplication')
           p.write_text(s)
 
-          # 2) Types: keep the actual File separately from the UI/display URL.
+          # Types: retain the original File so submit does not decode base64.
           p = Path('src/types.ts')
           s = p.read_text()
           if 'resumeFile?: File;' not in s:
               s = s.replace('  resumeUrl: string;\n', '  resumeUrl: string;\n  resumeFile?: File;\n', 1)
           p.write_text(s)
 
-          # 3) Careers UI: retain the selected File and do not convert it to base64.
+          # Careers: immediate synchronous ref lock prevents rapid clicks before React rerenders.
           p = Path('src/components/CareersView.tsx')
           s = p.read_text()
-          s = s.replace("  const [resumeBase64, setResumeBase64] = useState('');\n", "  const [resumeBase64, setResumeBase64] = useState('');\n  const [resumeFile, setResumeFile] = useState<File | null>(null);\n", 1)
-          s = s.replace("    const reader = new FileReader();\n    reader.onload = (e) => {\n      if (e.target?.result) {\n        setResumeBase64(e.target.result as string);\n        setResumeName(file.name);\n        setFormError('');\n      }\n    };\n    reader.readAsDataURL(file);", "    setResumeFile(file);\n    setResumeBase64(file.name);\n    setResumeName(file.name);\n    setFormError('');", 1)
+          if 'const submitLockRef = useRef(false);' not in s:
+              s = s.replace("  const fileInputRef = useRef<HTMLInputElement>(null);", "  const fileInputRef = useRef<HTMLInputElement>(null);\n  const submitLockRef = useRef(false);")
+          s = s.replace("    setIsSubmitting(false);\n    setFormError('');", "    setIsSubmitting(false);\n    submitLockRef.current = false;\n    setFormError('');", 1)
+          s = s.replace("    // Prevent double/triple clicks while the database + resume upload is in progress.\n    // Without this guard, every click creates a new UUID and therefore a new DB row.\n    if (isSubmitting) return;", "    // Lock synchronously BEFORE any await/state update. React state alone can be\n    // stale for several rapid clicks in the same event loop.\n    if (submitLockRef.current) return;\n    submitLockRef.current = true;\n    if (isSubmitting) return;")
+          s = s.replace("    } finally {\n      setIsSubmitting(false);\n    }", "    } finally {\n      setIsSubmitting(false);\n      submitLockRef.current = false;\n    }")
+          # Stop submit-time base64 conversion; keep the original File.
+          s = s.replace("    const reader = new FileReader();\n    reader.onload = (e) => {\n      if (e.target?.result) {\n        setResumeBase64(e.target.result as string);\n        setResumeName(file.name);\n        setFormError('');\n      }\n    };\n    reader.readAsDataURL(file);", "    setResumeFile(file);\n    setResumeBase64(file.name);\n    setResumeName(file.name);\n    setFormError('');")
+          if 'const [resumeFile, setResumeFile]' not in s:
+              s = s.replace("  const [resumeBase64, setResumeBase64] = useState('');", "  const [resumeBase64, setResumeBase64] = useState('');\n  const [resumeFile, setResumeFile] = useState<File | null>(null);")
           s = s.replace("    setResumeBase64('');\n  };\n\n  const handleFormSubmit", "    setResumeBase64('');\n    setResumeFile(null);\n  };\n\n  const handleFormSubmit", 1)
-          s = s.replace("      resumeUrl: resumeBase64, // Storing base64 as mock url; db layer uploads it to Storage.\n", "      resumeUrl: resumeBase64,\n      resumeFile: resumeFile || undefined,\n", 1)
+          s = s.replace("      resumeUrl: resumeBase64, // Storing base64 as mock url; db layer uploads it to Storage.", "      resumeUrl: resumeBase64,\n      resumeFile: resumeFile || undefined,")
           p.write_text(s)
 
-          # 4) DB: upload the original File directly. This removes the large base64
-          # conversion from the submit click and keeps the existing Storage/database flow.
+          # DB: upload the original File directly to Storage.
           p = Path('src/lib/db.ts')
           s = p.read_text()
-          s = s.replace("const persistResumeToStorage = async (resumeUrl: string, applicationId: string): Promise<string> => {\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;", "const persistResumeToStorage = async (resumeUrl: string, applicationId: string, resumeFile?: File): Promise<string> => {\n  if (resumeFile instanceof File) {\n    if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');\n    const extension = resumeFile.name.toLowerCase().endsWith('.docx') ? 'docx' : resumeFile.name.toLowerCase().endsWith('.doc') ? 'doc' : 'pdf';\n    const filePath = `applications/${applicationId}.${extension}`;\n    const contentType = resumeFile.type || 'application/octet-stream';\n    const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, resumeFile, { cacheControl: '3600', contentType, upsert: false });\n    if (error || !data) { console.error('[Applications] Resume storage upload failed:', error); throw new Error(error?.message || 'Unable to upload resume. Please try again.'); }\n    const { data: publicUrlData } = legacy.supabase.storage.from('documents').getPublicUrl(filePath);\n    const publicUrl = publicUrlData?.publicUrl;\n    if (!publicUrl) throw new Error('Resume uploaded but its public URL could not be created.');\n    return publicUrl;\n  }\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;", 1)
-          s = s.replace("  row.resume_url = await persistResumeToStorage(row.resume_url, row.id);", "  row.resume_url = await persistResumeToStorage(row.resume_url, row.id, application.resumeFile);", 1)
+          old = "const persistResumeToStorage = async (resumeUrl: string, applicationId: string): Promise<string> => {\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;"
+          new = "const persistResumeToStorage = async (resumeUrl: string, applicationId: string, resumeFile?: File): Promise<string> => {\n  if (resumeFile instanceof File) {\n    if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');\n    const extension = resumeFile.name.toLowerCase().endsWith('.docx') ? 'docx' : resumeFile.name.toLowerCase().endsWith('.doc') ? 'doc' : 'pdf';\n    const filePath = `applications/${applicationId}.${extension}`;\n    const contentType = resumeFile.type || 'application/octet-stream';\n    const { data, error } = await legacy.supabase.storage.from('documents').upload(filePath, resumeFile, { cacheControl: '3600', contentType, upsert: false });\n    if (error || !data) throw new Error(error?.message || 'Unable to upload resume. Please try again.');\n    const { data: publicUrlData } = legacy.supabase.storage.from('documents').getPublicUrl(filePath);\n    const publicUrl = publicUrlData?.publicUrl;\n    if (!publicUrl) throw new Error('Resume uploaded but its public URL could not be created.');\n    return publicUrl;\n  }\n  if (!resumeUrl || !resumeUrl.startsWith('data:')) return resumeUrl;"
+          if old in s:
+              s = s.replace(old, new, 1)
+          s = s.replace("  row.resume_url = await persistResumeToStorage(row.resume_url, row.id);", "  row.resume_url = await persistResumeToStorage(row.resume_url, row.id, application.resumeFile);")
           p.write_text(s)
           PY
           git diff --check
