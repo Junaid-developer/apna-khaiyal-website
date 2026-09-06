@@ -10,16 +10,11 @@ const readLocalList = <T>(key: string): T[] => {
   try {
     const value = JSON.parse(localStorage.getItem(key) || '[]');
     return Array.isArray(value) ? value : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 };
 
 const normalizeCareer = (job: any, index: number): CareerOpportunity => ({
-  id: typeof job?.id === 'string' && job.id.trim() ? job.id : crypto.randomUUID(),
-  title: job?.title || '', type: job?.type || 'job', department: job?.department || 'General', location: job?.location || '',
-  description: job?.description || '', requirements: Array.isArray(job?.requirements) ? job.requirements : [], responsibilities: Array.isArray(job?.responsibilities) ? job.responsibilities : [], benefits: Array.isArray(job?.benefits) ? job.benefits : [], experience: job?.experience || '', active: job?.active ?? job?.is_active ?? job?.isActive ?? true,
-  displayOrder: Number.isFinite(job?.displayOrder) ? job.displayOrder : Number.isFinite(job?.display_order) ? job.display_order : index,
+  id: typeof job?.id === 'string' && job.id.trim() ? job.id : crypto.randomUUID(), title: job?.title || '', type: job?.type || 'job', department: job?.department || 'General', location: job?.location || '', description: job?.description || '', requirements: Array.isArray(job?.requirements) ? job.requirements : [], responsibilities: Array.isArray(job?.responsibilities) ? job.responsibilities : [], benefits: Array.isArray(job?.benefits) ? job.benefits : [], experience: job?.experience || '', active: job?.active ?? job?.is_active ?? job?.isActive ?? true, displayOrder: Number.isFinite(job?.displayOrder) ? job.displayOrder : Number.isFinite(job?.display_order) ? job.display_order : index,
 });
 
 const persistCareerList = async (items: CareerOpportunity[]) => {
@@ -79,8 +74,14 @@ const persistApplication = async (item: JobApplication) => {
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured in the deployed website.');
   const row = toApplicationRow(application);
   row.resume_url = await persistResumeToStorage(row.resume_url, row.id);
-  const { error } = await legacy.supabase.from('job_applications').upsert(row, { onConflict: 'id' });
+
+  // Public applicants only have INSERT permission on job_applications. Using
+  // upsert here incorrectly requires UPDATE/SELECT permissions and caused the
+  // generic submission error. Every public submission already has a UUID, so
+  // a plain INSERT is the correct operation.
+  const { error } = await legacy.supabase.from('job_applications').insert(row);
   if (error) throw error;
+
   const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: row.resume_url };
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify([cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)])); } catch {}
@@ -129,16 +130,11 @@ export const dbStore = {
   getApplications: () => legacy.isSupabaseConfigured ? readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY) : legacy.dbStore.getApplications(),
   saveCareers: persistCareerList,
   deleteApplications,
-  // Public career submissions use this method so saving one new application
-  // can never interpret the one-item list as a full replacement of the DB.
   addApplication: async (item: JobApplication) => persistApplication(item),
   saveApplications: async (items: JobApplication[]) => {
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
     const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-    // A single new UUID is the public "append" operation. Do not delete cached records.
-    if (list.length === 1 && isUuid(list[0].id) && !cached.some(existing => existing.id === list[0].id)) {
-      return [await persistApplication(list[0])];
-    }
+    if (list.length === 1 && isUuid(list[0].id) && !cached.some(existing => existing.id === list[0].id)) return [await persistApplication(list[0])];
     const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
     const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
