@@ -12,6 +12,7 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
   const [selectedJob, setSelectedJob] = useState<CareerOpportunity | null>(null);
   const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
   const [formSubmitted, setFormSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Application Form State
   const [fullName, setFullName] = useState('');
@@ -81,6 +82,7 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
     setSelectedJob(job);
     setIsApplyModalOpen(true);
     setFormSubmitted(false);
+    setIsSubmitting(false);
     setFormError('');
     // Clear inputs
     setFullName('');
@@ -93,10 +95,18 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
 
   const handleFormSubmit = async (e: FormEvent) => {
     e.preventDefault();
+
+    // Prevent double/triple clicks while the database + resume upload is in progress.
+    // Without this guard, every click creates a new UUID and therefore a new DB row.
+    if (isSubmitting) return;
+
     if (!fullName || !email || !phone || !resumeBase64) {
       setFormError('Please fill out all required fields and upload your resume.');
       return;
     }
+
+    setIsSubmitting(true);
+    setFormError('');
 
     const newApp: JobApplication = {
       id: crypto.randomUUID(),
@@ -105,7 +115,7 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
       fullName,
       email,
       phone,
-      resumeUrl: resumeBase64, // Storing base64 as mock url
+      resumeUrl: resumeBase64, // Storing base64 as mock url; db layer uploads it to Storage.
       coverLetter,
       appliedAt: new Date().toISOString()
     };
@@ -116,8 +126,10 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
       setFormError('');
     } catch (error) {
       console.error('[Careers] Application submission failed:', error);
-      setFormError('Unable to submit your application right now. Please try again.');
-      return;
+      const message = error instanceof Error ? error.message : 'Unable to submit your application right now. Please try again.';
+      setFormError(message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -449,9 +461,10 @@ export default function CareersView({ opportunities, onAddApplication }: Careers
                     <button
                       type="submit"
                       id="submit-job-app-btn"
-                      className="w-full py-3.5 rounded-xl bg-[#e1b382] hover:bg-[#d4af37] text-[#12343b] hover:text-[#12343b] text-xs font-bold tracking-widest uppercase transition-all cursor-pointer shadow-md"
+                      disabled={isSubmitting}
+                      className={`w-full py-3.5 rounded-xl bg-[#e1b382] hover:bg-[#d4af37] text-[#12343b] hover:text-[#12343b] text-xs font-bold tracking-widest uppercase transition-all cursor-pointer shadow-md ${isSubmitting ? 'opacity-60 cursor-not-allowed' : ''}`}
                     >
-                      Submit Corporate Application
+                      {isSubmitting ? 'Submitting Application...' : 'Submit Corporate Application'}
                     </button>
                   </form>
                 ) : (
