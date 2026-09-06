@@ -64,7 +64,9 @@ const toApplicationRow = (item: JobApplication) => {
     phone: application.phone || '',
     experience: application.experience || '',
     cover_note: application.coverLetter || application.cover_note || '',
-    resume_url: typeof application.resumeUrl === 'string' && application.resumeUrl.startsWith('data:') ? '' : application.resumeUrl || application.resume_url || '',
+    // Resume data is intentionally preserved. CareersView supplies the uploaded
+    // file as a data URL; stripping it here made the admin resume link disappear.
+    resume_url: application.resumeUrl || application.resume_url || '',
     status: application.status || 'New',
     created_at: application.appliedAt || new Date().toISOString(),
   };
@@ -79,7 +81,7 @@ const persistApplication = async (item: JobApplication) => {
   const { error } = await legacy.supabase.from('job_applications').upsert(row, { onConflict: 'id' });
   if (error) throw error;
 
-  const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: '' };
+  const cachedApplication: JobApplication = { ...(application as JobApplication), id: row.id, resumeUrl: row.resume_url };
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   const merged = [cachedApplication, ...cached.filter(existing => existing.id !== cachedApplication.id)];
   try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(merged)); } catch {}
@@ -88,14 +90,20 @@ const persistApplication = async (item: JobApplication) => {
 
 const deleteApplications = async (ids: string[]) => {
   const uniqueIds = Array.from(new Set(ids.filter(isUuid)));
-  if (!uniqueIds.length) return;
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');
 
-  const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds);
-  if (error) throw error;
+  if (uniqueIds.length) {
+    const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds);
+    if (error) throw error;
+  }
 
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cached.filter(item => !uniqueIds.includes(item.id)))); } catch {}
+  try {
+    localStorage.setItem(
+      APPLICATIONS_CACHE_KEY,
+      JSON.stringify(uniqueIds.length ? cached.filter(item => !uniqueIds.includes(item.id)) : [])
+    );
+  } catch {}
 };
 
 const readCareerSettings = async () => {
@@ -127,8 +135,7 @@ const wrappedSyncAllFromSupabase = async () => {
     }
 
     // Supabase is the source of truth for applications. Never repair or
-    // re-insert records from localStorage during refresh; that was the cause
-    // of deleted applications returning and duplicate rows being created.
+    // re-insert records from localStorage during refresh.
     if (hasAuthenticatedSession) {
       try {
         const { data: applicationRows, error: applicationError } = await legacy.supabase
@@ -137,6 +144,7 @@ const wrappedSyncAllFromSupabase = async () => {
           .order('created_at', { ascending: false });
         if (applicationError) throw applicationError;
 
+        const seen = new Set<string>();
         const remoteApplications = (applicationRows || []).map((item: any) => ({
           id: item.id || '',
           jobId: item.job_id || '',
@@ -149,7 +157,11 @@ const wrappedSyncAllFromSupabase = async () => {
           resumeUrl: item.resume_url || '',
           status: item.status || 'New',
           appliedAt: item.created_at || '',
-        })).filter((item: JobApplication) => item.id);
+        })).filter((item: JobApplication) => {
+          if (!item.id || seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
 
         data.applications = remoteApplications;
         try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(remoteApplications)); } catch {}
@@ -178,18 +190,17 @@ export const dbStore = {
   deleteApplications,
   saveApplications: async (items: JobApplication[]) => {
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
-    if (!list.length) return [];
-
     const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
     const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
 
-    // Admin delete currently sends the remaining list. Only reconcile IDs that
-    // are real UUIDs already known in the cache; never generate IDs for old rows.
+    // Admin deletion passes the remaining list. Reconcile against the cached
+    // UUIDs, including the empty-list case, so deleting the final application
+    // really removes it from Supabase instead of letting it return on refresh.
     const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
-    if (removedIds.length && list.every(item => !item.id || cachedIds.has(item.id))) {
-      await deleteApplications(removedIds);
-    }
+    if (removedIds.length) await deleteApplications(removedIds);
+
+    if (!list.length) return [];
 
     const saved: JobApplication[] = [];
     for (const item of list) saved.push(await persistApplication(item));
