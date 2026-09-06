@@ -76,8 +76,8 @@ const persistResumeToStorage = async (resumeUrl: string, applicationId: string):
 };
 
 // Module-level idempotency lock: even if React receives several rapid submit
-// events before its state rerenders, only the first application write is allowed
-// to reach Storage/Supabase. Concurrent callers share the same in-flight result.
+events before its state rerenders, only the first application write is allowed
+to reach Storage/Supabase. Concurrent callers share the same in-flight result.
 let activeApplicationWrite: Promise<JobApplication> | null = null;
 
 const persistApplication = (item: JobApplication): Promise<JobApplication> => {
@@ -112,7 +112,10 @@ const persistApplication = (item: JobApplication): Promise<JobApplication> => {
 const deleteApplications = async (ids: string[]) => {
   const uniqueIds = Array.from(new Set(ids.filter(isUuid)));
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');
-  if (uniqueIds.length) { const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds); if (error) throw error; }
+  if (uniqueIds.length) {
+    const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds);
+    if (error) throw error;
+  }
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(uniqueIds.length ? cached.filter(item => !uniqueIds.includes(item.id)) : [])); } catch {}
 };
@@ -156,10 +159,23 @@ export const dbStore = {
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
     const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
     if (list.length === 1 && isUuid(list[0].id) && !cached.some(existing => existing.id === list[0].id)) return [await persistApplication(list[0])];
-    const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
+
+    // For admin deletions, compare against the live Supabase table instead of
+    // relying on localStorage. This prevents stale/missing cache entries from
+    // making submitted applications impossible to delete.
     const incomingIds = new Set(list.map(item => item.id).filter(isUuid));
-    const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
-    if (removedIds.length) await deleteApplications(removedIds);
+    if (legacy.supabase && legacy.isSupabaseConfigured) {
+      const { data: liveRows, error: liveError } = await legacy.supabase.from('job_applications').select('id');
+      if (liveError) throw liveError;
+      const liveIds = (liveRows || []).map((row: any) => row.id).filter(isUuid);
+      const removedIds = liveIds.filter(id => !incomingIds.has(id));
+      if (removedIds.length) await deleteApplications(removedIds);
+    } else {
+      const cachedIds = new Set(cached.map(item => item.id).filter(isUuid));
+      const removedIds = Array.from(cachedIds).filter(id => !incomingIds.has(id));
+      if (removedIds.length) await deleteApplications(removedIds);
+    }
+
     if (!list.length) return [];
     const saved: JobApplication[] = [];
     for (const item of list) saved.push(await persistApplication(item));
