@@ -50,12 +50,23 @@ const persistResumeToStorage = async (resumeUrl: string, applicationId: string):
   const encoded = match[3] || '';
   let blob: Blob;
   try {
-    if (match[2]) {
-      const binary = atob(encoded); const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      blob = new Blob([bytes], { type: contentType });
-    } else blob = new Blob([decodeURIComponent(encoded)], { type: contentType });
-  } catch { throw new Error('Unable to read the uploaded resume. Please select the file again.'); }
+    // Use the browser's native data-URL decoder instead of a JavaScript byte-by-byte
+    // atob/Uint8Array loop. Large resumes can otherwise block the main thread long
+    // enough to make the first submit click appear unresponsive.
+    blob = await fetch(resumeUrl).then(response => {
+      if (!response.ok) throw new Error('Unable to decode the uploaded resume.');
+      return response.blob();
+    });
+    if (!blob.type && contentType) blob = new Blob([blob], { type: contentType });
+  } catch {
+    try {
+      if (match[2]) {
+        const binary = atob(encoded); const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        blob = new Blob([bytes], { type: contentType });
+      } else blob = new Blob([decodeURIComponent(encoded)], { type: contentType });
+    } catch { throw new Error('Unable to read the uploaded resume. Please select the file again.'); }
+  }
   const extensionByType: Record<string, string> = { 'application/pdf': 'pdf', 'application/msword': 'doc', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx' };
   const extension = extensionByType[contentType] || 'bin';
   const filePath = `applications/${applicationId}.${extension}`;
