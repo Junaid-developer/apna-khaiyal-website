@@ -109,9 +109,10 @@ const persistApplication = (item: JobApplication): Promise<JobApplication> => {
 const deleteApplications = async (ids: string[]) => {
   const uniqueIds = Array.from(new Set(ids.filter(isUuid)));
   if (!legacy.supabase || !legacy.isSupabaseConfigured) throw new Error('Supabase is not configured.');
-  if (uniqueIds.length) {
-    const { error } = await legacy.supabase.from('job_applications').delete().in('id', uniqueIds);
+  for (const id of uniqueIds) {
+    const { data, error } = await legacy.supabase.rpc('admin_delete_job_application', { p_id: id });
     if (error) throw error;
+    if (data === false) throw new Error(`Application ${id} could not be deleted.`);
   }
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
   try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(uniqueIds.length ? cached.filter(item => !uniqueIds.includes(item.id)) : [])); } catch {}
@@ -164,15 +165,10 @@ export const dbStore = {
       const removedIds = liveIds.filter(id => !incomingIds.has(id));
       if (removedIds.length) await deleteApplications(removedIds);
 
-      // Admin application-list saves are not new submissions. Never re-insert
-      // rows that already exist in Supabase; doing so caused deletion attempts
-      // to fail on duplicate primary keys before the UI could finish the save.
       if (list.length) {
         const newItems = list.filter(item => isUuid(item.id) && !liveIds.includes(item.id));
         if (newItems.length) {
-          const saved: JobApplication[] = [];
-          for (const item of newItems) saved.push(await persistApplication(item));
-          return saved.length ? list : list;
+          for (const item of newItems) await persistApplication(item);
         }
       }
 
