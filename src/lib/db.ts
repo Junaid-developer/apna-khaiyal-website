@@ -79,12 +79,16 @@ const persistApplication = async (item: JobApplication) => {
   const application: any = item || {};
   const row = {
     id: typeof application.id === 'string' && application.id.trim() ? application.id : crypto.randomUUID(),
-    job_id: null,
+    job_id: application.jobId || null,
     job_title: application.jobTitle || 'General Application',
     applicant_name: application.fullName || application.applicantName || '',
     email: application.email || application.applicantEmail || '',
     phone: application.phone || '',
     cover_note: application.coverLetter || application.cover_note || '',
+    // The resume is converted to base64 in the browser. Do NOT put that large
+    // data URL into localStorage; it can exceed the browser's storage quota.
+    // A real resume-storage URL can be added here later when Supabase Storage
+    // upload is enabled.
     resume_url: typeof application.resumeUrl === 'string' && application.resumeUrl.startsWith('data:')
       ? '' : application.resumeUrl || application.resume_url || '',
     status: application.status || 'New',
@@ -93,6 +97,8 @@ const persistApplication = async (item: JobApplication) => {
 
   if (!row.applicant_name || !row.email) throw new Error('Applicant name and email are required.');
 
+  // Persist the application first. A local cache failure must never turn a
+  // successfully inserted application into a user-facing submission error.
   if (publicApplicationClient) {
     const { error } = await publicApplicationClient.from('job_applications').insert(row);
     if (error) {
@@ -101,9 +107,19 @@ const persistApplication = async (item: JobApplication) => {
     }
   }
 
+  // Cache only lightweight application metadata. Never cache the base64 resume.
+  const cachedApplication: JobApplication = {
+    ...(application as JobApplication),
+    resumeUrl: '',
+  };
   const cached = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  const merged = [application as JobApplication, ...cached.filter(existing => existing.id !== row.id)];
-  localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(merged));
+  const merged = [cachedApplication, ...cached.filter(existing => existing.id !== row.id)];
+  try {
+    localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(merged));
+  } catch (cacheError) {
+    console.warn('[Applications] Local cache could not be updated; Supabase record is already saved:', cacheError);
+  }
+
   return application as JobApplication;
 };
 
@@ -128,7 +144,7 @@ const wrappedSyncAllFromSupabase = async () => {
 
   if (!data) {
     if (cachedApplicationsBeforeSync.length > 0) {
-      localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync));
+      try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync)); } catch {}
     }
     return data;
   }
@@ -155,17 +171,17 @@ const wrappedSyncAllFromSupabase = async () => {
       const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
       const pendingLocalApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIds.has(item.id));
       data.applications = [...pendingLocalApplications, ...remoteApplications];
-      localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications));
+      try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications)); } catch {}
     } catch (error) {
       console.error('[Applications] Direct Supabase sync failed:', error);
       if (cachedApplicationsBeforeSync.length > 0) {
         data.applications = cachedApplicationsBeforeSync;
-        localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync));
+        try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync)); } catch {}
       }
     }
   } else if (cachedApplicationsBeforeSync.length > 0) {
     data.applications = cachedApplicationsBeforeSync;
-    localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync));
+    try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(cachedApplicationsBeforeSync)); } catch {}
   }
 
   return data;
