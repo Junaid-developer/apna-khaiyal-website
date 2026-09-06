@@ -72,8 +72,6 @@ const persistApplication = async (item: JobApplication) => {
     throw new Error('Supabase is not configured in the deployed website.');
   }
 
-  // Use the exact same Supabase client that the rest of the app uses.
-  // This avoids a second client being created from a different/stale set of Vercel env vars.
   const { error } = await legacy.supabase.from('job_applications').insert(row);
   if (error) {
     console.error('[Applications] Supabase insert failed:', {
@@ -107,29 +105,66 @@ const readCareerSettings = async () => {
 
 const wrappedSyncAllFromSupabase = async () => {
   const cachedApplicationsBeforeSync = readLocalList<JobApplication>(APPLICATIONS_CACHE_KEY);
-  const data = await legacy.syncAllFromSupabase();
+  let hasAuthenticatedSession = false;
+
+  if (legacy.supabase && legacy.isSupabaseConfigured) {
+    try {
+      const { data: { session } } = await legacy.supabase.auth.getSession();
+      hasAuthenticatedSession = Boolean(session?.user);
+    } catch {
+      hasAuthenticatedSession = false;
+    }
+  }
+
+  // Public visitors must never query job_applications because applicant data is
+  // intentionally protected by RLS. Authenticated admin sessions can load it.
+  const data = await legacy.syncAllFromSupabase(hasAuthenticatedSession ? 'Admin' : 'Public');
   if (!data) return data;
+
   if (legacy.supabase && legacy.isSupabaseConfigured) {
     const savedCareers = await readCareerSettings();
     if (savedCareers) {
       data.careers = savedCareers.map((item: any, index: number) => normalizeCareer(item, index));
       localStorage.setItem(CAREERS_CACHE_KEY, JSON.stringify(data.careers));
     }
-    try {
-      const { data: applicationRows, error: applicationError } = await legacy.supabase.from('job_applications').select('*').order('created_at', { ascending: false });
-      if (applicationError) throw applicationError;
-      const remoteApplications = (applicationRows || []).map((item: any) => ({
-        id: item.id || '', jobId: item.job_id || '', jobTitle: item.job_title || 'General Application', fullName: item.applicant_name || '', email: item.email || '', phone: item.phone || '', experience: item.experience || '', coverLetter: item.cover_note || '', resumeUrl: item.resume_url || '', status: item.status || 'New', appliedAt: item.created_at || '',
-      })).filter((item: JobApplication) => item.id);
-      const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
-      const pendingLocalApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIds.has(item.id));
-      data.applications = [...pendingLocalApplications, ...remoteApplications];
-      try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications)); } catch {}
-    } catch (error) {
-      console.error('[Applications] Direct Supabase sync failed:', error);
-      if (cachedApplicationsBeforeSync.length > 0) data.applications = cachedApplicationsBeforeSync;
+
+    if (hasAuthenticatedSession) {
+      try {
+        const { data: applicationRows, error: applicationError } = await legacy.supabase
+          .from('job_applications')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (applicationError) throw applicationError;
+
+        const remoteApplications = (applicationRows || []).map((item: any) => ({
+          id: item.id || '',
+          jobId: item.job_id || '',
+          jobTitle: item.job_title || 'General Application',
+          fullName: item.applicant_name || '',
+          email: item.email || '',
+          phone: item.phone || '',
+          experience: item.experience || '',
+          coverLetter: item.cover_note || '',
+          resumeUrl: item.resume_url || '',
+          status: item.status || 'New',
+          appliedAt: item.created_at || '',
+        })).filter((item: JobApplication) => item.id);
+
+        const remoteIds = new Set(remoteApplications.map((item: JobApplication) => item.id));
+        const pendingLocalApplications = cachedApplicationsBeforeSync.filter(item => item.id && !remoteIds.has(item.id));
+        data.applications = [...pendingLocalApplications, ...remoteApplications];
+        try { localStorage.setItem(APPLICATIONS_CACHE_KEY, JSON.stringify(data.applications)); } catch {}
+      } catch (error) {
+        console.error('[Applications] Direct Supabase sync failed:', error);
+        if (cachedApplicationsBeforeSync.length > 0) data.applications = cachedApplicationsBeforeSync;
+      }
+    } else if (cachedApplicationsBeforeSync.length > 0) {
+      data.applications = cachedApplicationsBeforeSync;
     }
-  } else if (cachedApplicationsBeforeSync.length > 0) data.applications = cachedApplicationsBeforeSync;
+  } else if (cachedApplicationsBeforeSync.length > 0) {
+    data.applications = cachedApplicationsBeforeSync;
+  }
+
   return data;
 };
 
