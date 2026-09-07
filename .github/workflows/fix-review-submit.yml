@@ -1,0 +1,95 @@
+name: Fix public review submission
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-review-submit.yml'
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch review submission
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/App.tsx')
+          s = p.read_text()
+          old = """  const handleSubmitPublicReview = (newReview: ClientReview) => {
+    const updated = [newReview, ...(Array.isArray(reviews) ? reviews : [])];
+    handleSaveReviews(updated);
+  };"""
+          new = """  const handleSubmitPublicReview = async (newReview: ClientReview) => {
+    if (!supabase || !isSupabaseConfigured) {
+      throw new Error('Supabase is not configured.');
+    }
+
+    const reviewId = crypto.randomUUID();
+    const row = {
+      id: reviewId,
+      author: newReview.name?.trim() || 'Anonymous',
+      role: newReview.designation?.trim() || 'Client',
+      company: newReview.company?.trim() || '',
+      text: newReview.review?.trim() || '',
+      rating: Number(newReview.rating) || 5,
+      project_scope: '',
+      status: 'pending',
+      is_featured: false,
+      user_image: newReview.photoUrl?.trim() || '',
+      gender: null,
+      created_at: newReview.createdAt || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase.from('reviews').insert(row);
+    if (error) {
+      console.error('[Reviews] Supabase insert failed:', error);
+      throw new Error(error.message || 'Unable to save review.');
+    }
+
+    const savedReview: ClientReview = {
+      ...newReview,
+      id: reviewId
+    };
+    setReviews(prev => [savedReview, ...(Array.isArray(prev) ? prev : [])]);
+    try {
+      dbStore.saveReviews([savedReview, ...(Array.isArray(reviews) ? reviews : [])]);
+    } catch (cacheError) {
+      console.warn('[Reviews] Local cache update failed:', cacheError);
+    }
+  };"""
+          if old not in s:
+              raise SystemExit('Expected handleSubmitPublicReview block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Verify build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/App.tsx
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git commit -m 'fix: persist public reviews in reviews table'
+          git push
+
+      - name: Remove temporary workflow
+        if: success()
+        run: |
+          git rm .github/workflows/fix-review-submit.yml || true
+          git commit -m 'chore: remove temporary review submit workflow' || true
+          git push || true
