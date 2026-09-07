@@ -1,0 +1,129 @@
+name: Add Safe Theme Toggle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-theme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add theme state and toggle wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          app = Path('src/App.tsx')
+          s = app.read_text()
+          old = """  // Dark Theme Enforcement
+  useEffect(() => {
+    document.documentElement.classList.remove('light-theme');
+    document.documentElement.classList.add('dark');
+  }, []);
+"""
+          new = """  // Public site theme preference. Default remains dark; light mode is opt-in.
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return localStorage.getItem('apna-khaiyal-theme') === 'light' ? 'light' : 'dark';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('light-theme', theme === 'light');
+    root.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('apna-khaiyal-theme', theme);
+  }, [theme]);
+
+  const handleToggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+"""
+          if old not in s:
+              raise SystemExit('App theme block not found; aborting without changes')
+          s = s.replace(old, new, 1)
+          old2 = """        isAdminLoggedIn={isAdminLoggedIn}
+        onLogout={() => {
+"""
+          new2 = """        isAdminLoggedIn={isAdminLoggedIn}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        onLogout={() => {
+"""
+          if old2 not in s:
+              raise SystemExit('Navbar props marker not found; aborting without changes')
+          s = s.replace(old2, new2, 1)
+          app.write_text(s)
+
+          nav = Path('src/components/Navbar.tsx')
+          n = nav.read_text()
+          n = n.replace("import { Menu, X } from 'lucide-react';", "import { Menu, X, Sun, Moon } from 'lucide-react';", 1)
+          old3 = """  onToggleTheme?: () => void;
+}
+"""
+          # already present in the current component; keep it unchanged
+          if old3 not in n:
+              raise SystemExit('Theme props missing; aborting without changes')
+          old4 = """  onLogout: () => void;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
+}) {
+"""
+          new4 = """  onLogout: () => void;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
+}) {
+"""
+          if old4 not in n:
+              raise SystemExit('Navbar signature marker not found; aborting without changes')
+          old5 = """            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              id=\"mobile-menu-trigger\"
+"""
+          new5 = """            <button
+              onClick={onToggleTheme}
+              id=\"desktop-theme-toggle-btn\"
+              className=\"hidden md:flex min-w-[40px] min-h-[40px] items-center justify-center p-2 rounded-xl text-[#CBD5E1] hover:text-[#E7C66A] hover:bg-[#12343b] transition-all focus:outline-none cursor-pointer border border-white/10\"
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+            >
+              {theme === 'dark' ? <Sun className=\"w-5 h-5\" /> : <Moon className=\"w-5 h-5\" />}
+            </button>
+
+            <button
+              onClick={onToggleTheme}
+              id=\"mobile-header-theme-toggle-btn\"
+              className=\"md:hidden min-w-[40px] min-h-[40px] flex items-center justify-center p-2 rounded-xl text-[#CBD5E1] hover:text-[#E7C66A] hover:bg-[#12343b] transition-all focus:outline-none cursor-pointer border border-white/10\"
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+            >
+              {theme === 'dark' ? <Sun className=\"w-5 h-5\" /> : <Moon className=\"w-5 h-5\" />}
+            </button>
+
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              id=\"mobile-menu-trigger\"
+"""
+          if old5 not in n:
+              raise SystemExit('Navbar button marker not found; aborting without changes')
+          n = n.replace(old5, new5, 1)
+          nav.write_text(n)
+          PY
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx src/components/Navbar.tsx
+          git diff --cached --quiet && { echo "No changes needed"; exit 0; }
+          git commit -m "Add header light dark theme toggle"
+          git push
+
+      - name: Remove temporary workflow
+        if: success()
+        run: |
+          git rm .github/workflows/add-theme-toggle.yml
+          git commit -m "Remove temporary theme toggle workflow"
+          git push
