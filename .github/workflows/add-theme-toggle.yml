@@ -1,6 +1,8 @@
 name: Add Safe Theme Toggle
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -60,24 +62,6 @@ jobs:
           nav = Path('src/components/Navbar.tsx')
           n = nav.read_text()
           n = n.replace("import { Menu, X } from 'lucide-react';", "import { Menu, X, Sun, Moon } from 'lucide-react';", 1)
-          old3 = """  onToggleTheme?: () => void;
-}
-"""
-          # already present in the current component; keep it unchanged
-          if old3 not in n:
-              raise SystemExit('Theme props missing; aborting without changes')
-          old4 = """  onLogout: () => void;
-  theme?: 'dark' | 'light';
-  onToggleTheme?: () => void;
-}) {
-"""
-          new4 = """  onLogout: () => void;
-  theme?: 'dark' | 'light';
-  onToggleTheme?: () => void;
-}) {
-"""
-          if old4 not in n:
-              raise SystemExit('Navbar signature marker not found; aborting without changes')
           old5 = """            <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               id=\"mobile-menu-trigger\"
