@@ -5,8 +5,11 @@ const marker = '/* Slider Core Frame */';
 const source = fs.readFileSync(file, 'utf8');
 const markerIndex = source.indexOf(marker);
 
+// The Featured Products section has been removed from the Home page.
+// Nothing needs to be optimized when its old marker no longer exists.
 if (markerIndex === -1) {
-  throw new Error('Home Featured Products marker not found');
+  console.log('Home Featured Products section is removed; skipping legacy optimization.');
+  process.exit(0);
 }
 
 const before = source.slice(0, markerIndex + marker.length);
