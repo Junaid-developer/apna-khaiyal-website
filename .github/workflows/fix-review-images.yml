@@ -1,0 +1,41 @@
+name: Fix Review Images
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix review image upload and display
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          modal = Path('src/components/AddReviewModal.tsx')
+          s = modal.read_text()
+          s = s.replace("import { uploadImageToSupabase } from '../lib/db';", "import { uploadImageToSupabase } from '../lib/supabase';")
+          s = s.replace("uploadImageToSupabase('review-images', file, 'profiles')", "uploadImageToSupabase(file, 'reviews')")
+          s = s.replace("uploadImageToSupabase('review-images', file, 'logos')", "uploadImageToSupabase(file, 'reviews')")
+          modal.write_text(s)
+
+          app = Path('src/App.tsx')
+          s = app.read_text()
+          marker = '''<span className="text-xs text-[#CBD5E1] block font-sans mt-0.5">\n                            {approvedReviews[activeReviewIdx % approvedReviews.length]?.designation} · {approvedReviews[activeReviewIdx % approvedReviews.length]?.company}'''
+          replacement = '''<div className="flex items-center justify-center gap-3 mb-3 min-h-[44px]">\n                            {approvedReviews[activeReviewIdx % approvedReviews.length]?.companyLogoUrl?.trim() && (\n                              <div className="w-14 h-10 rounded-lg bg-white/95 border border-[#e1b382]/40 p-1.5 flex items-center justify-center shadow-sm">\n                                <img\n                                  src={approvedReviews[activeReviewIdx % approvedReviews.length].companyLogoUrl}\n                                  alt={`${approvedReviews[activeReviewIdx % approvedReviews.length].company} logo`}\n                                  className="max-w-full max-h-full object-contain"\n                                  referrerPolicy="no-referrer"\n                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}\n                                />\n                              </div>\n                            )}\n                          </div>\n                          <span className="text-xs text-[#CBD5E1] block font-sans mt-0.5">\n                            {approvedReviews[activeReviewIdx % approvedReviews.length]?.designation} · {approvedReviews[activeReviewIdx % approvedReviews.length]?.company}'''
+          if marker not in s:
+              raise SystemExit('Review display marker not found in App.tsx; no partial change committed.')
+          s = s.replace(marker, replacement, 1)
+          app.write_text(s)
+          PY
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/AddReviewModal.tsx src/App.tsx
+          git commit -m 'fix: display review photos and company logos'
+          git push
+          rm -f .github/workflows/fix-review-images.yml
+          git add .github/workflows/fix-review-images.yml
+          git commit -m 'chore: remove temporary review image workflow' || true
+          git push || true
