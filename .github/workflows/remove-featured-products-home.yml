@@ -1,0 +1,51 @@
+name: Remove Featured Products Home Section
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remove-section:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove featured products section from Home
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/App.tsx')
+          s = p.read_text()
+          start = s.find('              {/* Featured Products Slider */}')
+          if start == -1:
+              print('Featured Products section already removed; nothing to do.')
+              raise SystemExit(0)
+
+          end_marker = '              {/* Development Process */}'
+          end = s.find(end_marker, start)
+          if end == -1:
+              raise SystemExit('Could not locate Development Process marker.')
+
+          s = s[:start] + s[end:]
+          p.write_text(s)
+          PY
+
+          git diff --check
+
+      - name: Commit change
+        run: |
+          if git diff --quiet -- src/App.tsx; then
+            echo 'No source change needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/App.tsx
+          git commit -m 'fix: remove featured products from home'
+          git push
