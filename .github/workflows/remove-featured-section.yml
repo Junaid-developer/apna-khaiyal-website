@@ -1,0 +1,42 @@
+name: Remove Featured Proprietary Systems
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  remove-section:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'fix: remove featured proprietary systems'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove featured section from home page
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('src/App.tsx')
+          s = p.read_text()
+          patterns = [
+              r'\n?\s*<section[^>]*>\s*<div[^>]*>[^<]*Featured Proprietary Systems.*?</section>',
+              r'\n?\s*<section[^>]*>.*?Featured Proprietary Systems.*?</section>',
+          ]
+          for pattern in patterns:
+              new, n = re.subn(pattern, '', s, count=1, flags=re.S|re.I)
+              if n:
+                  s = new
+                  break
+          if 'Featured Proprietary Systems' in s:
+              raise SystemExit('Featured section still exists; refusing to commit incomplete change')
+          p.write_text(s)
+          PY
+          git diff --check
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: remove featured proprietary systems'
+          git push
