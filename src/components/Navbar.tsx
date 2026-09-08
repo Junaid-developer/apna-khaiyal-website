@@ -98,8 +98,7 @@ export default function Navbar({
             <BrandLogo
               customLogoUrl={settings.companyLogo}
               size="md"
-              showBrandText={true}
-              iconOnly={true}
+              showTagline={true}
             />
           </div>
 
