@@ -29,9 +29,6 @@ export default function Navbar({
     return localStorage.getItem('apna-khaiyal-theme') === 'light' ? 'light' : 'dark';
   });
 
-  // Keep the theme controlled from the header without changing the rest of the app.
-  // The app currently applies the dark class on startup, so observe class changes
-  // and immediately restore the user's selected theme when needed.
   useEffect(() => {
     const applyTheme = () => {
       const root = document.documentElement;
@@ -73,8 +70,6 @@ export default function Navbar({
     if (isPublicPage) {
       setCurrentTab(publicPath);
     }
-    // Intentionally run once on initial mount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleNavClick = (tabId: string) => {
@@ -103,7 +98,8 @@ export default function Navbar({
             <BrandLogo
               customLogoUrl={settings.companyLogo}
               size="md"
-              showBrandText={false}
+              showBrandText={true}
+              iconOnly={true}
             />
           </div>
 
