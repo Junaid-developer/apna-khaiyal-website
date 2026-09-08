@@ -66,10 +66,6 @@ export default function Navbar({
     { id: 'contact', label: 'Contact' }
   ];
 
-  // Select the matching public view only when the app first loads.
-  // Do not re-run this on currentTab changes, otherwise programmatic navigation
-  // (for example Products -> Book Demo -> Contact) gets immediately overwritten
-  // by the old URL path.
   useEffect(() => {
     const path = window.location.pathname.replace(/\/$/, '') || '/';
     const publicPath = path === '/' ? 'home' : path.slice(1);
@@ -107,7 +103,7 @@ export default function Navbar({
             <BrandLogo
               customLogoUrl={settings.companyLogo}
               size="md"
-              showTagline={true}
+              showBrandText={false}
             />
           </div>
 
