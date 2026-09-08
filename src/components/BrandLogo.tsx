@@ -5,6 +5,7 @@ interface BrandLogoProps {
   className?: string;
   showTagline?: boolean;
   showBrandText?: boolean;
+  iconOnly?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   variant?: 'auto' | 'square' | 'horizontal' | 'vertical';
 }
@@ -14,6 +15,7 @@ export default function BrandLogo({
   className = '',
   showTagline = true,
   showBrandText = true,
+  iconOnly = false,
   size = 'md',
 }: BrandLogoProps) {
   const [imgError, setImgError] = useState(false);
@@ -33,18 +35,22 @@ export default function BrandLogo({
   }[size];
 
   const effectiveLogoUrl = (customLogoUrl && customLogoUrl.trim() !== '') ? customLogoUrl : '/logo.png';
+  const shouldShowBrandText = showBrandText && !iconOnly;
 
   return (
-    <div className={`flex items-center ${showBrandText ? 'space-x-2.5 sm:space-x-3.5' : ''} cursor-pointer select-none group/logo ${className}`} id="brand-logo-container">
-      {/* Golden Winged "K" Bird Logo Mark */}
+    <div className={`flex items-center ${shouldShowBrandText ? 'space-x-2.5 sm:space-x-3.5' : ''} cursor-pointer select-none group/logo ${className}`} id="brand-logo-container">
+      {/* Logo image. In iconOnly mode, crop the source image so only its logo mark is visible. */}
       {!imgError ? (
-        <img
-          src={effectiveLogoUrl}
-          alt="Apna Khaiyal Logo"
-          onError={() => setImgError(true)}
-          referrerPolicy="no-referrer"
-          className={`${logoHeights} object-contain transition-transform duration-300 group-hover/logo:scale-105 shrink-0 rounded-lg`}
-        />
+        <div className={`${logoHeights} shrink-0 overflow-hidden flex items-center justify-center`}>
+          <img
+            src={effectiveLogoUrl}
+            alt="Apna Khaiyal Logo"
+            onError={() => setImgError(true)}
+            referrerPolicy="no-referrer"
+            className={`${iconOnly ? 'h-full w-auto max-w-none object-contain' : 'w-full h-full object-contain'} transition-transform duration-300 group-hover/logo:scale-105 rounded-lg`}
+            style={iconOnly ? { transform: 'translateX(-22%) scale(1.18)' } : undefined}
+          />
+        </div>
       ) : (
         /* Crisp Golden Vector SVG Fallback */
         <div className={`${logoHeights} shrink-0 flex items-center justify-center transition-transform duration-300 group-hover/logo:scale-105`}>
@@ -77,7 +83,7 @@ export default function BrandLogo({
       )}
 
       {/* Brand Heading & Green Tagline */}
-      {showBrandText && (
+      {shouldShowBrandText && (
         <div className="flex flex-col justify-center select-none" id="brand-text-block">
           <span className={`${textSizes.title} font-sans tracking-wide text-[#E7C66A] group-hover/logo:text-[#F3E2A9] transition-colors leading-tight`}>
             Apna Khaiyal
