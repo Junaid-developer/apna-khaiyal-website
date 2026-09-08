@@ -164,6 +164,44 @@ body.light-theme { background-color: #f8fafc; color: #0f172a; }
 .light-theme ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 .light-theme ::-webkit-scrollbar-thumb:hover { background: #d97706; }
 
+/* Light mode: ALL normal buttons are blue. Header/navigation buttons are excluded. */
+.light-theme button:not(#main-navbar button) {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
+}
+.light-theme button:not(#main-navbar button):hover {
+  background-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  border-color: #1d4ed8 !important;
+}
+
+/* Header + navigation: preserve their existing design in light mode. */
+.light-theme #main-navbar button {
+  background-color: revert !important;
+  border-color: revert !important;
+}
+.light-theme #main-navbar button:not(#desktop-theme-toggle-btn):not(#mobile-header-theme-toggle-btn) {
+  color: #334155 !important;
+}
+.light-theme #main-navbar button:not(#desktop-theme-toggle-btn):not(#mobile-header-theme-toggle-btn):hover {
+  color: #b45309 !important;
+}
+
+/* Theme toggle itself stays blue. */
+.light-theme #desktop-theme-toggle-btn,
+.light-theme #mobile-header-theme-toggle-btn {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
+}
+.light-theme #desktop-theme-toggle-btn:hover,
+.light-theme #mobile-header-theme-toggle-btn:hover {
+  background-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  border-color: #1d4ed8 !important;
+}
+
 /* Global light-theme readability */
 .light-theme,
 .light-theme body,
@@ -190,20 +228,3 @@ body.light-theme { background-color: #f8fafc; color: #0f172a; }
 .light-theme input,
 .light-theme textarea,
 .light-theme select { color: #0f172a; }
-
-/* IMPORTANT: Do not force blue styling onto every button in light mode.
-   Header/navigation controls retain their existing colors. */
-.light-theme #main-navbar button:not(#desktop-theme-toggle-btn):not(#mobile-header-theme-toggle-btn) {
-  background-color: transparent !important;
-  border-color: transparent !important;
-}
-
-/* Theme toggle remains blue intentionally. */
-.light-theme #desktop-theme-toggle-btn,
-.light-theme #mobile-header-theme-toggle-btn {
-  background-color: #2563eb !important;
-  color: #ffffff !important;
-  border-color: #2563eb !important;
-}
-.light-theme #desktop-theme-toggle-btn:hover,
-.light-theme #mobile-header-theme-toggle-btn:hover { background-color: #1d4ed8 !important; color: #ffffff !important; }
