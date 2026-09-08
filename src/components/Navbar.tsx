@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Menu, X, Sun, Moon } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SystemSettings, CompanyInformation, CompanyContact } from '../types';
 import BrandLogo from './BrandLogo';
@@ -12,8 +12,6 @@ interface NavbarProps {
   companyContact?: CompanyContact;
   isAdminLoggedIn: boolean;
   onLogout: () => void;
-  theme?: 'dark' | 'light';
-  onToggleTheme?: () => void;
 }
 
 export default function Navbar({
@@ -24,33 +22,6 @@ export default function Navbar({
   companyContact,
 }: NavbarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    if (typeof window === 'undefined') return 'dark';
-    return localStorage.getItem('apna-khaiyal-theme') === 'light' ? 'light' : 'dark';
-  });
-
-  useEffect(() => {
-    const applyTheme = () => {
-      const root = document.documentElement;
-      root.classList.toggle('light-theme', theme === 'light');
-      root.classList.toggle('dark', theme === 'dark');
-    };
-
-    applyTheme();
-    localStorage.setItem('apna-khaiyal-theme', theme);
-
-    const observer = new MutationObserver(applyTheme);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
-    return () => observer.disconnect();
-  }, [theme]);
-
-  const handleToggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  };
 
   const menuItems = [
     { id: 'home', label: 'Home' },
@@ -130,26 +101,6 @@ export default function Navbar({
           </div>
 
           <div className="flex items-center space-x-2 md:space-x-3">
-            <button
-              onClick={handleToggleTheme}
-              id="desktop-theme-toggle-btn"
-              className="hidden md:flex min-w-[44px] min-h-[44px] items-center justify-center p-2 rounded-xl text-[#E7C66A] hover:bg-[#12343b] transition-all focus:outline-none cursor-pointer border border-white/10"
-              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-              title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            >
-              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
-
-            <button
-              onClick={handleToggleTheme}
-              id="mobile-header-theme-toggle-btn"
-              className="md:hidden min-w-[44px] min-h-[44px] flex items-center justify-center p-2 rounded-xl text-[#E7C66A] hover:bg-[#12343b] transition-all focus:outline-none cursor-pointer border border-white/10"
-              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-              title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            >
-              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
-
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               id="mobile-menu-trigger"
