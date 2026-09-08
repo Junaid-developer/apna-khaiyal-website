@@ -164,25 +164,22 @@ body.light-theme { background-color: #f8fafc; color: #0f172a; }
 .light-theme ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 .light-theme ::-webkit-scrollbar-thumb:hover { background: #d97706; }
 
-/* Light mode: all buttons are blue EXCEPT the complete header/navigation. */
-.light-theme button:not(#main-navbar button) {
+/* Light mode: blue buttons ONLY outside the navbar. */
+.light-theme button:not(:where(#main-navbar button)) {
   background-color: #2563eb !important;
   color: #ffffff !important;
   border-color: #2563eb !important;
 }
-.light-theme button:not(#main-navbar button):hover {
+.light-theme button:not(:where(#main-navbar button)):hover {
   background-color: #1d4ed8 !important;
   color: #ffffff !important;
   border-color: #1d4ed8 !important;
 }
 
-/* Header/navigation buttons are completely untouched in light mode. */
+/* Navbar navigation buttons keep their own Tailwind styling. */
 .light-theme #main-navbar button {
   background-color: transparent !important;
   border-color: transparent !important;
-}
-.light-theme #main-navbar button:hover {
-  background-color: transparent !important;
 }
 .light-theme #main-navbar button:not(#desktop-theme-toggle-btn):not(#mobile-header-theme-toggle-btn) {
   color: #334155 !important;
@@ -191,18 +188,18 @@ body.light-theme { background-color: #f8fafc; color: #0f172a; }
   color: #b45309 !important;
 }
 
-/* Theme toggle keeps its original header appearance; no blue square. */
+/* Theme toggle is blue, but it is the ONLY blue button in the navbar. */
 .light-theme #desktop-theme-toggle-btn,
 .light-theme #mobile-header-theme-toggle-btn {
-  color: #334155 !important;
-  background-color: transparent !important;
-  border-color: transparent !important;
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
 }
 .light-theme #desktop-theme-toggle-btn:hover,
 .light-theme #mobile-header-theme-toggle-btn:hover {
-  color: #b45309 !important;
-  background-color: transparent !important;
-  border-color: transparent !important;
+  background-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  border-color: #1d4ed8 !important;
 }
 
 /* Global light-theme readability */
