@@ -4,6 +4,7 @@ interface BrandLogoProps {
   customLogoUrl?: string;
   className?: string;
   showTagline?: boolean;
+  showBrandText?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   variant?: 'auto' | 'square' | 'horizontal' | 'vertical';
 }
@@ -12,6 +13,7 @@ export default function BrandLogo({
   customLogoUrl,
   className = '',
   showTagline = true,
+  showBrandText = true,
   size = 'md',
 }: BrandLogoProps) {
   const [imgError, setImgError] = useState(false);
@@ -33,8 +35,8 @@ export default function BrandLogo({
   const effectiveLogoUrl = (customLogoUrl && customLogoUrl.trim() !== '') ? customLogoUrl : '/logo.png';
 
   return (
-    <div className={`flex items-center space-x-2.5 sm:space-x-3.5 cursor-pointer select-none group/logo ${className}`} id="brand-logo-container">
-      {/* Golden Winged "K" Bird Logo Mark on left side of Heading */}
+    <div className={`flex items-center ${showBrandText ? 'space-x-2.5 sm:space-x-3.5' : ''} cursor-pointer select-none group/logo ${className}`} id="brand-logo-container">
+      {/* Golden Winged "K" Bird Logo Mark */}
       {!imgError ? (
         <img
           src={effectiveLogoUrl}
@@ -61,18 +63,9 @@ export default function BrandLogo({
                 <stop offset="100%" stopColor="#9E741B"/>
               </linearGradient>
             </defs>
-            <path
-              d="M50,26 C75,26 95,35 125,58 C155,82 178,118 202,152 C184,185 158,212 120,222 C88,225 68,205 70,170 C72,130 90,88 140,48 C108,30 75,25 50,26 Z"
-              fill="url(#goldGradFallback)"
-            />
-            <path
-              d="M185,150 C215,188 255,208 300,215 C335,212 355,205 350,203 C310,195 272,175 235,142 C215,124 198,138 185,150 Z"
-              fill="url(#goldGradFallback)"
-            />
-            <path
-              d="M135,170 C165,130 205,85 255,52 C285,34 315,25 325,25 C315,30 290,48 262,72 C225,105 188,148 160,190 C145,185 138,178 135,170 Z"
-              fill="url(#goldGradFeather)"
-            />
+            <path d="M50,26 C75,26 95,35 125,58 C155,82 178,118 202,152 C184,185 158,212 120,222 C88,225 68,205 70,170 C72,130 90,88 140,48 C108,30 75,25 50,26 Z" fill="url(#goldGradFallback)" />
+            <path d="M185,150 C215,188 255,208 300,215 C335,212 355,205 350,203 C310,195 272,175 235,142 C215,124 198,138 185,150 Z" fill="url(#goldGradFallback)" />
+            <path d="M135,170 C165,130 205,85 255,52 C285,34 315,25 325,25 C315,30 290,48 262,72 C225,105 188,148 160,190 C145,185 138,178 135,170 Z" fill="url(#goldGradFeather)" />
             <g stroke="#FFF0A8" strokeWidth="2.5" strokeLinecap="round" opacity="0.9">
               <path d="M170,160 C195,126 230,88 275,56" />
               <path d="M180,152 C205,120 238,82 285,50" />
@@ -84,21 +77,18 @@ export default function BrandLogo({
       )}
 
       {/* Brand Heading & Green Tagline */}
-      <div className="flex flex-col justify-center select-none" id="brand-text-block">
-        <span className={`${textSizes.title} font-sans tracking-wide text-[#E7C66A] group-hover/logo:text-[#F3E2A9] transition-colors leading-tight`}>
-          Apna Khaiyal
-        </span>
-        {showTagline && (
-          <span className={`${textSizes.tagline} font-sans font-semibold tracking-wider text-[#22c55e] uppercase leading-tight mt-0.5 group-hover/logo:text-[#4ade80] transition-colors`}>
-            Anytime Anywhere
+      {showBrandText && (
+        <div className="flex flex-col justify-center select-none" id="brand-text-block">
+          <span className={`${textSizes.title} font-sans tracking-wide text-[#E7C66A] group-hover/logo:text-[#F3E2A9] transition-colors leading-tight`}>
+            Apna Khaiyal
           </span>
-        )}
-      </div>
+          {showTagline && (
+            <span className={`${textSizes.tagline} font-sans font-semibold tracking-wider text-[#22c55e] uppercase leading-tight mt-0.5 group-hover/logo:text-[#4ade80] transition-colors`}>
+              Anytime Anywhere
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
-
-
-
-
-
