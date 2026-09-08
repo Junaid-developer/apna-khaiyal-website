@@ -164,7 +164,7 @@ body.light-theme { background-color: #f8fafc; color: #0f172a; }
 .light-theme ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 .light-theme ::-webkit-scrollbar-thumb:hover { background: #d97706; }
 
-/* Light mode: ALL normal buttons are blue. Header/navigation buttons are excluded. */
+/* Light mode: all buttons are blue EXCEPT the complete header/navigation. */
 .light-theme button:not(#main-navbar button) {
   background-color: #2563eb !important;
   color: #ffffff !important;
@@ -176,10 +176,13 @@ body.light-theme { background-color: #f8fafc; color: #0f172a; }
   border-color: #1d4ed8 !important;
 }
 
-/* Header + navigation: preserve their existing design in light mode. */
+/* Header/navigation buttons are completely untouched in light mode. */
 .light-theme #main-navbar button {
-  background-color: revert !important;
-  border-color: revert !important;
+  background-color: transparent !important;
+  border-color: transparent !important;
+}
+.light-theme #main-navbar button:hover {
+  background-color: transparent !important;
 }
 .light-theme #main-navbar button:not(#desktop-theme-toggle-btn):not(#mobile-header-theme-toggle-btn) {
   color: #334155 !important;
@@ -188,18 +191,18 @@ body.light-theme { background-color: #f8fafc; color: #0f172a; }
   color: #b45309 !important;
 }
 
-/* Theme toggle itself stays blue. */
+/* Theme toggle keeps its original header appearance; no blue square. */
 .light-theme #desktop-theme-toggle-btn,
 .light-theme #mobile-header-theme-toggle-btn {
-  background-color: #2563eb !important;
-  color: #ffffff !important;
-  border-color: #2563eb !important;
+  color: #334155 !important;
+  background-color: transparent !important;
+  border-color: transparent !important;
 }
 .light-theme #desktop-theme-toggle-btn:hover,
 .light-theme #mobile-header-theme-toggle-btn:hover {
-  background-color: #1d4ed8 !important;
-  color: #ffffff !important;
-  border-color: #1d4ed8 !important;
+  color: #b45309 !important;
+  background-color: transparent !important;
+  border-color: transparent !important;
 }
 
 /* Global light-theme readability */
